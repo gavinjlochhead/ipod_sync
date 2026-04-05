@@ -235,6 +235,77 @@
     </div>
   </div>
 
+  <!-- HA eject integration reference -->
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-eject me-2"></i>Triggering Eject from Home Assistant
+      </div>
+      <div class="card-body">
+        <div class="row g-4">
+
+          <div class="col-12 col-md-6">
+            <h6 class="text-muted text-uppercase small mb-2">
+              <i class="bi bi-broadcast me-1"></i>Via MQTT (auto-discovery, recommended)
+            </h6>
+            <p class="small text-muted mb-2">
+              When MQTT + auto-discovery is enabled, a
+              <strong>button entity</strong> called <em>Eject iPod</em> is
+              automatically created in Home Assistant.  It is only available
+              when the iPod is connected.  Use it in automations like any
+              other button:
+            </p>
+            <pre class="p-2 rounded small" style="background:#111;color:#ccc;white-space:pre-wrap">automation:
+  - alias: "Eject iPod after sync"
+    trigger:
+      - platform: state
+        entity_id: sensor.ipod_sync_status
+        to: "idle"
+        for: "00:00:10"
+    condition:
+      - condition: state
+        entity_id: button.eject_ipod
+        attribute: available
+        state: true
+    action:
+      - action: button.press
+        target:
+          entity_id: button.eject_ipod</pre>
+            <p class="small text-muted mt-2 mb-0">
+              You can also publish directly to the MQTT topic
+              <code id="eject-topic">ipod_sync/eject/set</code>
+              with any payload to trigger the eject.
+            </p>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <h6 class="text-muted text-uppercase small mb-2">
+              <i class="bi bi-globe me-1"></i>Via REST command (no MQTT needed)
+            </h6>
+            <p class="small text-muted mb-2">
+              Add this to your Home Assistant <code>configuration.yaml</code>
+              then call <code>rest_command.eject_ipod</code> from any
+              automation or script:
+            </p>
+            <pre class="p-2 rounded small" style="background:#111;color:#ccc;white-space:pre-wrap" id="ha-rest-snippet">rest_command:
+  eject_ipod:
+    url: http://&lt;pi-ip&gt;:8000/api/eject
+    method: POST</pre>
+            <button class="btn btn-sm btn-outline-secondary mt-1"
+              onclick="copyRestSnippet()">
+              <i class="bi bi-clipboard me-1"></i>Copy with this Pi's IP
+            </button>
+            <p class="small text-muted mt-2 mb-0">
+              Returns <code>{"ok": true, "message": "…"}</code> on success,
+              or HTTP 409 if a sync is still in progress.
+            </p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Save all -->
   <div class="col-12">
     <div class="d-flex gap-2">
@@ -328,6 +399,26 @@ function copyHaUrl() {
   const url = document.getElementById('ha-endpoint-display').value;
   navigator.clipboard.writeText(url).catch(() => {});
 }
+
+function copyRestSnippet() {
+  const host = window.location.hostname;
+  const snippet = `rest_command:\n  eject_ipod:\n    url: http://${host}:8000/api/eject\n    method: POST`;
+  navigator.clipboard.writeText(snippet).then(() => {
+    // Also update the displayed snippet with the real IP
+    document.getElementById('ha-rest-snippet').textContent = snippet;
+  }).catch(() => {});
+}
+
+// Fill in the MQTT eject topic based on saved prefix
+async function updateEjectTopic() {
+  try {
+    const s = await apiFetch('/settings');
+    const prefix = s.mqtt_prefix || 'ipod_sync';
+    document.getElementById('eject-topic').textContent = `${prefix}/eject/set`;
+  } catch(e) {}
+}
+
+updateEjectTopic();
 
 async function testJF() {
   const badge = document.getElementById('jf-status');

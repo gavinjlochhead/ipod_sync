@@ -165,6 +165,7 @@ async def save_settings(payload: SettingsPayload, db: AsyncSession = Depends(get
             password=payload.mqtt_password or None,
             prefix=payload.mqtt_prefix or "ipod_sync",
             ha_discovery=payload.mqtt_ha_discovery,
+            api_base="http://127.0.0.1:8000",
         )
         if payload.mqtt_ha_discovery:
             mqtt_pub.publish_ha_discovery()

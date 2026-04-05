@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
             password=s.get(cfg.MQTT_PASSWORD) or None,
             prefix=s.get(cfg.MQTT_PREFIX, "ipod_sync") or "ipod_sync",
             ha_discovery=(s.get(cfg.MQTT_HA_DISCOVERY, "true") == "true"),
+            api_base="http://127.0.0.1:8000",
         )
         if s.get(cfg.MQTT_HA_DISCOVERY, "true") == "true":
             mqtt_pub.publish_ha_discovery()
