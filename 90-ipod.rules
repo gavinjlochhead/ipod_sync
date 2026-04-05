@@ -1,23 +1,23 @@
-# udev rules for iPod Classic (original Apple VID/PID)
-# These ensure the device is accessible to the ipod-sync user
-# and that automount happens reliably.
+# udev rules for iPod Classic (Apple VID 05ac) with Rockbox installed.
+# Rockbox presents the device as standard USB Mass Storage.
 #
-# Apple iPod Classic USB VID = 05ac, various PIDs:
-#   0x1261 = iPod Classic (1st/2nd gen)
-#   0x1262 = iPod Classic (3rd gen)
-#   0x1263 = iPod Classic (4th gen)
-#   0x1265 = iPod Classic (5th gen / Video)
-#   0x1266 = iPod Classic (5.5th gen)
-#   0x1267 = iPod Classic (6th/7th gen)
+# Apple iPod Classic USB Product IDs:
+#   1261 = iPod Classic 1st gen  (rare)
+#   1262 = iPod Classic 2nd gen
+#   1263 = iPod Classic 3rd gen
+#   1265 = iPod Classic 5th gen (Video)
+#   1266 = iPod Classic 5.5th gen
+#   1267 = iPod Classic 6th/7th gen (most common)
 #
-# With Rockbox installed the device appears as a standard USB Mass
-# Storage device with the same VID/PID.
+# Rule 1: match each PID individually (| is not valid in ATTRS matching)
+ACTION=="add", SUBSYSTEM=="block", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="1261", TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"
+ACTION=="add", SUBSYSTEM=="block", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="1262", TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"
+ACTION=="add", SUBSYSTEM=="block", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="1263", TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"
+ACTION=="add", SUBSYSTEM=="block", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="1265", TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"
+ACTION=="add", SUBSYSTEM=="block", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="1266", TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"
+ACTION=="add", SUBSYSTEM=="block", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="1267", TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"
 
-ACTION=="add", SUBSYSTEM=="block", \
-  ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="1261|1262|1263|1265|1266|1267", \
-  TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"
-
-# Fallback: match by filesystem label regardless of device identity
-# (useful if Rockbox changes how the device presents itself)
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="IPOD", \
-  TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"
+# Rule 2: fallback — match any block device with filesystem label IPOD.
+# This catches Rockbox if the VID/PID changes, or any other device
+# you label IPOD.  udisks2 sets ID_FS_LABEL when it probes the device.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="IPOD", TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"

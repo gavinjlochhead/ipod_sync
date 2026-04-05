@@ -56,13 +56,26 @@ class IPodManager:
                     parts = line.split()
                     if len(parts) >= 2:
                         device, mount = parts[0], parts[1]
-                        # Check blkid for label
+                        # Check blkid for label.
+                        # The service user may not have direct device access;
+                        # try plain blkid first (works if user is in `disk`
+                        # group), fall back to sudo blkid (sudoers rule in
+                        # install.sh grants this without a password).
                         try:
-                            out = subprocess.check_output(
+                            for blkid_cmd in (
                                 ["blkid", "-s", "LABEL", "-o", "value", device],
-                                stderr=subprocess.DEVNULL,
-                                timeout=5,
-                            ).decode().strip()
+                                ["sudo", "blkid", "-s", "LABEL", "-o", "value", device],
+                            ):
+                                try:
+                                    out = subprocess.check_output(
+                                        blkid_cmd,
+                                        stderr=subprocess.DEVNULL,
+                                        timeout=5,
+                                    ).decode().strip()
+                                    break
+                                except subprocess.CalledProcessError:
+                                    out = ""
+                                    continue
                             if out.upper() == label.upper():
                                 return mount
                         except Exception:

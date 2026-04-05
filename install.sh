@@ -26,7 +26,7 @@ info "Installing system packages…"
 apt-get update -qq
 apt-get install -y -qq \
     python3 python3-pip python3-venv \
-    util-linux udev \
+    rsync udisks2 util-linux udev \
     2>/dev/null
 
 # ── User & directories ───────────────────────────────────────
@@ -36,7 +36,8 @@ if ! id "${SERVICE_USER}" &>/dev/null; then
         --groups plugdev "${SERVICE_USER}" || true
 fi
 
-# Add to plugdev/disk so it can access block devices via blkid
+# plugdev  → udisks2 mount/unmount without root
+# disk     → blkid can read device labels
 usermod -aG plugdev,disk "${SERVICE_USER}" 2>/dev/null || true
 
 info "Creating directories…"
@@ -63,23 +64,40 @@ info "Installing Python dependencies…"
 
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
 
+# ── sudoers rules ───────────────────────────────────────────
+# Allow the service user to unmount and run blkid without a password.
+# These are tightly scoped — no general sudo access is granted.
+info "Installing sudoers rules…"
+SUDOERS_FILE="/etc/sudoers.d/ipod-sync"
+tee "${SUDOERS_FILE}" > /dev/null <<EOF
+# ipod-sync: allow safe eject and device label detection
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/udisksctl unmount -b *
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/udisksctl power-off -b *
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /bin/umount ${MOUNT_POINT}
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/blkid
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /sbin/blkid
+EOF
+chmod 440 "${SUDOERS_FILE}"
+# Validate — will abort if syntax is wrong
+visudo -c -f "${SUDOERS_FILE}" || { rm -f "${SUDOERS_FILE}"; error "sudoers validation failed"; }
+
 # ── udev rules ───────────────────────────────────────────────
 info "Installing udev rules…"
 cp "${INSTALL_DIR}/90-ipod.rules" /etc/udev/rules.d/
 udevadm control --reload-rules
 udevadm trigger
 
-# ── systemd mount unit ───────────────────────────────────────
+# ── systemd mount unit (optional — Pi OS udisks2 usually auto-mounts) ───
+# Only install if /media/ipod does not already get auto-mounted by udisks2.
 info "Installing systemd mount unit…"
 cp "${INSTALL_DIR}/media-ipod.mount" /etc/systemd/system/
-systemctl daemon-reload
 
 # ── systemd services ─────────────────────────────────────────
 info "Installing systemd services…"
 cp "${INSTALL_DIR}/ipod-sync.service" /etc/systemd/system/
 cp "${INSTALL_DIR}/ipod-sync-daemon.service" /etc/systemd/system/
 
-# Update paths in service files to reference INSTALL_DIR
+# Patch paths and user in service files
 sed -i "s|/opt/ipod-sync|${INSTALL_DIR}|g" /etc/systemd/system/ipod-sync.service
 sed -i "s|/opt/ipod-sync|${INSTALL_DIR}|g" /etc/systemd/system/ipod-sync-daemon.service
 sed -i "s|User=ipod-sync|User=${SERVICE_USER}|g" /etc/systemd/system/ipod-sync.service
@@ -91,29 +109,44 @@ systemctl enable ipod-sync-daemon.service
 
 info "Starting services…"
 systemctl restart ipod-sync.service
-sleep 2
+sleep 3
 systemctl restart ipod-sync-daemon.service
 
 # ── Done ─────────────────────────────────────────────────────
 IP=$(hostname -I | awk '{print $1}')
+WEB_URL="http://${IP}:8000"
+
 echo
 echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║       iPod Sync installed!               ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
 echo
-echo -e "  Web UI:    ${YELLOW}http://${IP}:8000${NC}"
+echo -e "  Web UI:    ${YELLOW}${WEB_URL}${NC}"
 echo -e "  Data dir:  ${DATA_DIR}"
 echo -e "  Cache dir: ${CACHE_DIR}"
 echo -e "  Mount:     ${MOUNT_POINT}"
 echo
 echo -e "  Service status:"
-systemctl is-active ipod-sync.service && echo -e "    ${GREEN}✓${NC} ipod-sync" || echo -e "    ${RED}✗${NC} ipod-sync"
-systemctl is-active ipod-sync-daemon.service && echo -e "    ${GREEN}✓${NC} ipod-sync-daemon" || echo -e "    ${RED}✗${NC} ipod-sync-daemon"
+if systemctl is-active --quiet ipod-sync.service; then
+    echo -e "    ${GREEN}✓${NC} ipod-sync (web UI)"
+else
+    echo -e "    ${RED}✗${NC} ipod-sync  ← check: journalctl -u ipod-sync"
+fi
+if systemctl is-active --quiet ipod-sync-daemon.service; then
+    echo -e "    ${GREEN}✓${NC} ipod-sync-daemon (USB watcher)"
+else
+    echo -e "    ${RED}✗${NC} ipod-sync-daemon  ← check: journalctl -u ipod-sync-daemon"
+fi
 echo
-echo -e "  Next steps:"
-echo -e "    1. Open the web UI and configure Jellyfin + Pinepods"
-echo -e "    2. Add podcast subscriptions"
-echo -e "    3. Plug in your iPod — sync will start automatically"
-echo -e "    4. Or click 'Sync Now' in the web UI"
+echo -e "  ${YELLOW}Next steps:${NC}"
+echo -e "    1. Open ${WEB_URL}"
+echo -e "    2. Settings → enter your Jellyfin URL, API key, and User ID"
+echo -e "    3. Settings → enter Pinepods URL + API key (if using Pinepods)"
+echo -e "    4. Podcasts → add RSS feeds or import from Pinepods"
+echo -e "    5. Plug in your iPod — sync starts automatically"
+echo -e "       OR click 'Sync Now' in the web UI"
 echo
-echo -e "  Logs:  journalctl -fu ipod-sync"
+echo -e "  ${YELLOW}Rockbox play-history sync (optional):${NC}"
+echo -e "    On your iPod: Settings → General Settings → Playback → Last.fm Log → ON"
+echo
+echo -e "  Logs: journalctl -fu ipod-sync"

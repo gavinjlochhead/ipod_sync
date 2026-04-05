@@ -3,8 +3,12 @@ Safe iPod eject.
 
 1. Refuses to eject while a sync is in progress.
 2. Flushes kernel write buffers (sync).
-3. Unmounts the device.
-4. Optionally power-cycles the USB port via udisksctl for a clean disconnect.
+3. Unmounts the device via udisksctl (preferred) or sudo umount.
+4. Powers off the USB drive via udisksctl for a clean disconnect.
+
+The web app runs as the non-root `ipod-sync` user.  install.sh adds
+sudoers rules that allow this user to call udisksctl and umount without
+a password.
 """
 from __future__ import annotations
 
@@ -41,11 +45,14 @@ def eject(mount_point: str) -> str:
 
     # Check something is actually mounted there
     mounted = False
+    device = ""
     try:
         with open("/proc/mounts") as f:
             for line in f:
-                if line.split()[1] == mount_point:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == mount_point:
                     mounted = True
+                    device = parts[0]
                     break
     except Exception:
         pass
@@ -53,41 +60,30 @@ def eject(mount_point: str) -> str:
     if not mounted:
         return "iPod is not mounted — already ejected?"
 
-    # Flush write buffers
+    # Flush write buffers (runs as root via PATH, doesn't need sudo)
     log.info("Flushing write buffers…")
     _run(["sync"])
 
-    # Try udisksctl first (friendlier, powers down the port)
-    result = _run(["udisksctl", "unmount", "-b", _device_for_mount(mount_point)])
-    if result.returncode == 0:
-        log.info("Ejected via udisksctl")
-        # Power off the drive
-        _run(["udisksctl", "power-off", "-b", _device_for_mount(mount_point)])
-        return "iPod ejected safely — you can unplug it"
+    # Try udisksctl first — friendlier, powers down the USB port.
+    # Installed sudoers rule covers: udisksctl unmount -b *
+    if device:
+        result = _run(["sudo", "udisksctl", "unmount", "-b", device])
+        if result.returncode == 0:
+            log.info("Ejected via udisksctl (%s)", device)
+            _run(["sudo", "udisksctl", "power-off", "-b", device])
+            return "iPod ejected safely — you can unplug it"
 
-    # Fall back to plain umount
-    result = _run(["umount", mount_point])
+    # Fall back to sudo umount
+    # Installed sudoers rule covers: umount <MOUNT_POINT>
+    result = _run(["sudo", "umount", mount_point])
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        if "target is busy" in stderr:
+        if "target is busy" in stderr or "device is busy" in stderr:
             raise EjectError(
                 "Cannot eject — a file is still open on the iPod. "
                 "Wait for the sync to finish."
             )
         raise EjectError(f"umount failed: {stderr or result.stdout}")
 
-    log.info("Ejected via umount")
+    log.info("Ejected via sudo umount")
     return "iPod ejected safely — you can unplug it"
-
-
-def _device_for_mount(mount_point: str) -> str:
-    """Reverse-lookup the block device for a mount point from /proc/mounts."""
-    try:
-        with open("/proc/mounts") as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) >= 2 and parts[1] == mount_point:
-                    return parts[0]
-    except Exception:
-        pass
-    return ""

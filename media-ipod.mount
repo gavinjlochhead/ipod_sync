@@ -1,17 +1,40 @@
 # systemd mount unit for the iPod.
-# Copy to /etc/systemd/system/media-ipod.mount
-# Adjust What= to match your device (use LABEL=IPOD for label-based mount).
+#
+# This is used when Raspberry Pi OS does NOT auto-mount the iPod
+# (e.g. headless/server installs without udisks2 automounting).
+# On a standard Pi OS desktop/lite install, udisks2 will mount the
+# device automatically under /media/pi/IPOD — in that case you don't
+# need this unit and can set the mount point in the web UI to wherever
+# udisks2 puts it (check with: lsblk -o NAME,LABEL,MOUNTPOINT).
+#
+# To use this unit:
+#   sudo cp media-ipod.mount /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#
+# The unit file name MUST match the mount point path:
+#   /media/ipod  →  media-ipod.mount
 
 [Unit]
 Description=Mount iPod at /media/ipod
+# Wait for the partition with label IPOD to appear.
+# Hyphens in the original path are encoded as \x2d to distinguish them
+# from the - used as a path separator in the unit name.
 After=dev-disk-by\x2dlabel-IPOD.device
 Requires=dev-disk-by\x2dlabel-IPOD.device
 
 [Mount]
 What=/dev/disk/by-label/IPOD
 Where=/media/ipod
-Type=auto
-Options=rw,noatime,uid=ipod-sync,gid=plugdev,dmask=002,fmask=113
+# FAT32 / exFAT — explicitly named so the kernel uses the right driver
+Type=vfat
+# rw          read-write
+# noatime     skip updating access time (saves flash writes)
+# uid/gid     make files owned by the ipod-sync service user (UID 999
+#             is the typical UID of the first system user; check with
+#             `id ipod-sync` after install and update if different)
+# dmask/fmask directory / file permission masks (775 dirs, 664 files)
+# flush       write data to disk more aggressively (safer for FAT)
+Options=rw,noatime,uid=999,gid=999,dmask=002,fmask=113,flush
 
 [Install]
 WantedBy=multi-user.target
