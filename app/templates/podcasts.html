@@ -5,6 +5,9 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
   <h4 class="fw-bold mb-0">Podcast Subscriptions</h4>
   <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary" id="btn-refresh-all" onclick="refreshAll()">
+      <i class="bi bi-arrow-clockwise me-1"></i>Refresh All
+    </button>
     <button class="btn btn-outline-secondary" onclick="importFromPinepods()">
       <i class="bi bi-cloud-download me-1"></i>Import from Pinepods
     </button>
@@ -145,7 +148,11 @@ function renderPodcasts() {
                       onchange="toggleEnabled(${p.id}, this.checked)">
                   </div>
                 </td>
-                <td>
+                <td class="d-flex gap-1">
+                  <button class="btn btn-sm btn-outline-secondary" title="Refresh episode list"
+                    onclick="refreshPodcast(${p.id}, this)">
+                    <i class="bi bi-arrow-clockwise"></i>
+                  </button>
                   <button class="btn btn-sm btn-outline-danger"
                     onclick="deletePodcast(${p.id}, '${esc(p.title)}')">
                     <i class="bi bi-trash"></i>
@@ -190,6 +197,24 @@ async function addPodcast() {
     errEl.textContent = 'Network error';
     errEl.classList.remove('d-none');
   }
+}
+
+async function refreshPodcast(id, btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>';
+  await apiFetch(`/podcasts/${id}/refresh`, {method: 'POST'});
+  // Poll until episode_count updates (max 15s)
+  const start = Date.now();
+  const prev = podcastData.find(p => p.id === id)?.episode_count || 0;
+  const timer = setInterval(async () => {
+    await loadPodcasts();
+    const cur = podcastData.find(p => p.id === id)?.episode_count || 0;
+    if (cur !== prev || Date.now() - start > 15000) {
+      clearInterval(timer);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+    }
+  }, 1500);
 }
 
 async function deletePodcast(id, title) {
@@ -265,6 +290,20 @@ async function importSelected() {
   bootstrap.Modal.getInstance(document.getElementById('pinepodsModal')).hide();
   await loadPodcasts();
   if (added) alert(`Imported ${added} podcast(s)`);
+}
+
+async function refreshAll() {
+  const btn = document.getElementById('btn-refresh-all');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-arrow-repeat spin me-1"></i>Refreshing…';
+  for (const p of podcastData) {
+    await apiFetch(`/podcasts/${p.id}/refresh`, {method: 'POST'});
+  }
+  setTimeout(async () => {
+    await loadPodcasts();
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh All';
+  }, 3000);
 }
 
 loadPodcasts();

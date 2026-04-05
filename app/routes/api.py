@@ -306,6 +306,27 @@ async def test_ipod(db: AsyncSession = Depends(get_db)):
 # Jellyfin libraries
 # ---------------------------------------------------------------------------
 
+@router.get("/jellyfin/count")
+async def jellyfin_track_count(db: AsyncSession = Depends(get_db)):
+    """Return total tracks in the Jellyfin library without downloading anything."""
+    s = await cfg.get_all(db)
+    url = s.get(cfg.JELLYFIN_URL)
+    key = s.get(cfg.JELLYFIN_API_KEY)
+    uid = s.get(cfg.JELLYFIN_USER_ID)
+    if not url or not key or not uid:
+        return {"configured": False, "total": 0}
+    client = JellyfinClient(url, key, uid)
+    try:
+        total = await client.get_track_count(s.get(cfg.JELLYFIN_LIBRARY_ID) or None)
+        from sqlalchemy import func
+        on_device = (await db.execute(
+            select(func.count()).select_from(MusicTrack).where(MusicTrack.on_device == True)  # noqa: E712
+        )).scalar() or 0
+        return {"configured": True, "total": total, "on_device": on_device}
+    except Exception as exc:
+        return {"configured": True, "total": 0, "error": str(exc)}
+
+
 @router.get("/jellyfin/libraries")
 async def jellyfin_libraries(db: AsyncSession = Depends(get_db)):
     s = await cfg.get_all(db)
@@ -437,7 +458,6 @@ async def add_podcast(payload: PodcastAddPayload, db: AsyncSession = Depends(get
     if payload.source == "rss":
         if not payload.feed_url:
             raise HTTPException(400, "feed_url required for RSS source")
-        # Auto-fetch title if not provided or empty
         title = payload.title.strip()
         if not title:
             title = await rss_svc.fetch_feed_title(payload.feed_url)
@@ -454,7 +474,87 @@ async def add_podcast(payload: PodcastAddPayload, db: AsyncSession = Depends(get
     db.add(sub)
     await db.commit()
     await db.refresh(sub)
+
+    # Immediately prefetch episode metadata in the background so the
+    # podcast page shows counts without waiting for a full sync.
+    asyncio.create_task(_prefetch_episodes(sub.id, AsyncSessionLocal))
+
     return {"ok": True, "id": sub.id, "title": sub.title}
+
+
+async def _prefetch_episodes(sub_id: int, session_factory) -> None:
+    """Fetch and store episode metadata from RSS/Pinepods — no downloading."""
+    from app.models import PodcastEpisode, PodcastSubscription
+    from app import config as cfg
+
+    try:
+        async with session_factory() as db:
+            sub = await db.get(PodcastSubscription, sub_id)
+            if not sub:
+                return
+
+        if sub.source == "rss" and sub.feed_url:
+            episodes_raw = await rss_svc.fetch_episodes(sub.feed_url)
+            async with session_factory() as db:
+                for ep in episodes_raw:
+                    existing = await db.scalar(
+                        select(PodcastEpisode).where(
+                            PodcastEpisode.subscription_id == sub_id,
+                            PodcastEpisode.guid == ep.guid,
+                        )
+                    )
+                    if existing is None:
+                        db.add(PodcastEpisode(
+                            subscription_id=sub_id,
+                            guid=ep.guid,
+                            title=ep.title,
+                            url=ep.url,
+                            published_at=ep.published_at,
+                            duration_seconds=ep.duration_seconds,
+                        ))
+                await db.commit()
+            log.info("Prefetched %d episodes for %s", len(episodes_raw), sub.title)
+
+        elif sub.source == "pinepods" and sub.pinepods_podcast_id:
+            async with session_factory() as db:
+                settings = await cfg.get_all(db)
+            pp_url = settings.get(cfg.PINEPODS_URL)
+            pp_key = settings.get(cfg.PINEPODS_API_KEY)
+            if pp_url and pp_key:
+                from app.services.pinepods import PinepodsClient
+                client = PinepodsClient(pp_url, pp_key)
+                episodes_raw = await client.get_episodes(sub.pinepods_podcast_id)
+                async with session_factory() as db:
+                    for ep in episodes_raw:
+                        existing = await db.scalar(
+                            select(PodcastEpisode).where(
+                                PodcastEpisode.subscription_id == sub_id,
+                                PodcastEpisode.guid == ep.guid,
+                            )
+                        )
+                        if existing is None:
+                            db.add(PodcastEpisode(
+                                subscription_id=sub_id,
+                                guid=ep.guid,
+                                title=ep.title,
+                                url=ep.url,
+                                published_at=ep.published_at,
+                                duration_seconds=ep.duration,
+                                played=ep.played,
+                            ))
+                    await db.commit()
+    except Exception as exc:
+        log.warning("Episode prefetch failed for sub %s: %s", sub_id, exc)
+
+
+@router.post("/podcasts/{sub_id}/refresh")
+async def refresh_podcast_episodes(sub_id: int, db: AsyncSession = Depends(get_db)):
+    """Re-fetch episode list from source without running a full sync."""
+    sub = await db.get(PodcastSubscription, sub_id)
+    if not sub:
+        raise HTTPException(404, "Not found")
+    asyncio.create_task(_prefetch_episodes(sub.id, AsyncSessionLocal))
+    return {"ok": True, "message": "Refreshing episodes in background"}
 
 
 @router.delete("/podcasts/{sub_id}")

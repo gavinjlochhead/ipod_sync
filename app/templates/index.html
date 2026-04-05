@@ -4,13 +4,16 @@
 {% block content %}
 <h4 class="mb-4 fw-bold">Dashboard</h4>
 
+<!-- Status alerts — shown when something needs attention -->
+<div id="alerts-area" class="mb-3"></div>
+
 <div class="row g-3 mb-4">
   <div class="col-6 col-md-3">
     <div class="card stat-card h-100 text-center py-3">
       <div class="card-body">
-        <div class="card-title">Music Tracks</div>
+        <div class="card-title">Music Library</div>
         <div class="display-6" id="stat-music-total">—</div>
-        <small class="text-muted" id="stat-music-device">— on device</small>
+        <small id="stat-music-device" class="text-muted">checking…</small>
       </div>
     </div>
   </div>
@@ -19,7 +22,7 @@
       <div class="card-body">
         <div class="card-title">Podcasts</div>
         <div class="display-6" id="stat-pod-count">—</div>
-        <small class="text-muted" id="stat-pod-episodes">— episodes on device</small>
+        <small class="text-muted" id="stat-pod-episodes">checking…</small>
       </div>
     </div>
   </div>
@@ -28,7 +31,7 @@
       <div class="card-body">
         <div class="card-title">Free Space</div>
         <div class="display-6" id="stat-free">—</div>
-        <small class="text-muted" id="stat-total">— total</small>
+        <small class="text-muted" id="stat-total">iPod not connected</small>
       </div>
     </div>
   </div>
@@ -89,7 +92,7 @@
     <div class="card mt-3">
       <div class="card-header"><i class="bi bi-info-circle me-2"></i>iPod Status</div>
       <div class="card-body" id="ipod-detail">
-        <div class="text-muted">Checking…</div>
+        <div class="text-muted small">Checking…</div>
       </div>
     </div>
 
@@ -98,13 +101,9 @@
         <i class="bi bi-house-gear me-2"></i>Home Assistant
       </div>
       <div class="card-body">
-        <p class="text-muted small mb-2">
-          Poll this endpoint for sensor data:
-        </p>
+        <p class="text-muted small mb-2">Poll this endpoint for sensor data:</p>
         <code id="ha-endpoint" class="d-block p-2 rounded small"
-          style="background:#111;word-break:break-all">
-          http://…:8000/api/ha/status
-        </code>
+          style="background:#111;word-break:break-all">http://…:8000/api/ha/status</code>
         <button class="btn btn-sm btn-outline-secondary mt-2 w-100"
           onclick="copyHaEndpoint()">
           <i class="bi bi-clipboard me-1"></i>Copy URL
@@ -120,8 +119,7 @@
 <script>
 function fmtDate(iso) {
   if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  return new Date(iso).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
 }
 
 function statusBadge(s) {
@@ -129,30 +127,67 @@ function statusBadge(s) {
   return `<span class="badge ${m[s]||'bg-secondary'}">${s}</span>`;
 }
 
+function setAlerts(alerts) {
+  const el = document.getElementById('alerts-area');
+  el.innerHTML = alerts.map(a => `
+    <div class="alert alert-${a.type} d-flex align-items-center py-2 mb-2" role="alert">
+      <i class="bi ${a.icon} me-2 flex-shrink-0"></i>
+      <div>${a.msg}</div>
+    </div>`).join('');
+}
+
 async function loadDashboard() {
-  // Music stats
+  const alerts = [];
+
+  // ── Music: query Jellyfin directly for library count ───────────────
   try {
-    const m = await apiFetch('/music/stats');
-    document.getElementById('stat-music-total').textContent = m.total.toLocaleString();
-    document.getElementById('stat-music-device').textContent = `${m.on_device.toLocaleString()} on device`;
+    const m = await apiFetch('/jellyfin/count');
+    if (!m.configured) {
+      alerts.push({type:'warning', icon:'bi-collection-play',
+        msg: 'Jellyfin is not configured. <a href="/settings">Add your credentials →</a>'});
+      document.getElementById('stat-music-total').textContent = '—';
+      document.getElementById('stat-music-device').textContent = 'Not configured';
+    } else if (m.error) {
+      alerts.push({type:'danger', icon:'bi-collection-play',
+        msg: `Jellyfin error: ${m.error}`});
+      document.getElementById('stat-music-total').textContent = '!';
+      document.getElementById('stat-music-device').textContent = 'Connection error';
+    } else {
+      document.getElementById('stat-music-total').textContent = m.total.toLocaleString();
+      if (m.on_device > 0) {
+        document.getElementById('stat-music-device').textContent =
+          `${m.on_device.toLocaleString()} synced to device`;
+      } else {
+        document.getElementById('stat-music-device').textContent =
+          m.total > 0 ? 'Not yet synced — plug in iPod' : '0 tracks found';
+      }
+    }
   } catch(e) {}
 
-  // Podcast stats
+  // ── Podcast stats ──────────────────────────────────────────────────
   try {
     const pods = await apiFetch('/podcasts');
-    const epOnDevice = pods.reduce((a,p) => a + p.on_device, 0);
+    const totalEps = pods.reduce((a,p) => a + p.episode_count, 0);
+    const onDevice = pods.reduce((a,p) => a + p.on_device, 0);
     document.getElementById('stat-pod-count').textContent = pods.length;
-    document.getElementById('stat-pod-episodes').textContent = `${epOnDevice} episodes on device`;
+    if (pods.length === 0) {
+      document.getElementById('stat-pod-episodes').textContent = 'No subscriptions';
+    } else if (totalEps === 0) {
+      document.getElementById('stat-pod-episodes').textContent = 'Fetching episodes…';
+    } else {
+      document.getElementById('stat-pod-episodes').textContent =
+        `${onDevice} / ${totalEps} on device`;
+    }
   } catch(e) {}
 
-  // iPod detail
+  // ── iPod ───────────────────────────────────────────────────────────
   try {
     const ipod = await apiFetch('/test/ipod');
     const el = document.getElementById('ipod-detail');
     if (ipod.ok) {
       const pct = Math.round((1 - ipod.free_gb / ipod.total_gb) * 100);
       el.innerHTML = `
-        <div class="mb-2"><strong>Mount:</strong> <code>${ipod.mount}</code></div>
+        <div class="mb-2 small"><strong>Mount:</strong> <code>${ipod.mount}</code></div>
         <div class="mb-1 d-flex justify-content-between">
           <small>${ipod.free_gb} GB free of ${ipod.total_gb} GB</small>
           <small>${pct}% used</small>
@@ -163,25 +198,39 @@ async function loadDashboard() {
       document.getElementById('stat-free').textContent = `${ipod.free_gb}G`;
       document.getElementById('stat-total').textContent = `${ipod.total_gb} GB total`;
     } else {
-      el.innerHTML = `<span class="text-muted">${ipod.message}</span>`;
+      el.innerHTML = `
+        <div class="text-muted small mb-2">${ipod.message}</div>
+        <a href="/settings" class="btn btn-sm btn-outline-secondary w-100">
+          <i class="bi bi-gear me-1"></i>Check mount settings
+        </a>`;
       document.getElementById('stat-free').textContent = '—';
+      document.getElementById('stat-total').textContent = 'iPod not connected';
+      alerts.push({type:'warning', icon:'bi-usb-symbol',
+        msg: 'iPod not detected. Plug it in, then check the mount point in <a href="/settings">Settings</a>.'});
     }
   } catch(e) {}
 
-  // Logs
+  setAlerts(alerts);
+
+  // ── Logs ───────────────────────────────────────────────────────────
   try {
     const logs = await apiFetch('/logs?limit=5');
     const tbody = document.getElementById('log-table-body');
     if (!logs.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No syncs yet</td></tr>';
+      tbody.innerHTML = `
+        <tr><td colspan="5" class="text-center text-muted py-4">
+          No syncs yet — plug in your iPod and click <strong>Sync Now</strong>
+        </td></tr>`;
       return;
     }
     tbody.innerHTML = logs.map(l => `
       <tr>
         <td><small>${fmtDate(l.started_at)}</small></td>
         <td>${statusBadge(l.status)}</td>
-        <td><small>+${l.music_added}/-${l.music_removed}</small></td>
-        <td><small>+${l.podcasts_added}/-${l.podcasts_removed}</small></td>
+        <td><small class="${l.music_added>0?'text-success':''}">+${l.music_added}</small>
+            <small class="text-muted">/-${l.music_removed}</small></td>
+        <td><small class="${l.podcasts_added>0?'text-success':''}">+${l.podcasts_added}</small>
+            <small class="text-muted">/-${l.podcasts_removed}</small></td>
         <td><small class="text-muted">${l.message||''}</small></td>
       </tr>`).join('');
 
@@ -223,12 +272,11 @@ async function loadHaPreview() {
     el.innerHTML = `
       <div class="small mt-1">
         <span class="badge ${r.state==='syncing'?'bg-warning text-dark':r.state==='success'?'bg-success':'bg-secondary'}">${r.state||'idle'}</span>
-        ${r.last_sync_time ? `<span class="text-muted ms-2">Last: ${new Date(r.last_sync_time).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>` : ''}
+        ${r.last_sync_time ? `<span class="text-muted ms-2">Last: ${fmtDate(r.last_sync_time)}</span>` : ''}
       </div>`;
   } catch(e) {}
 }
 
-// Set HA endpoint URL dynamically
 document.getElementById('ha-endpoint').textContent =
   `${window.location.protocol}//${window.location.host}/api/ha/status`;
 

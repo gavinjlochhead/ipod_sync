@@ -69,6 +69,23 @@ class JellyfinClient:
                 return users[0]["Id"]
         return None
 
+    async def get_track_count(self, library_id: str | None = None) -> int:
+        """Return total number of audio items in the library — cheap, no download."""
+        params: dict = {
+            "IncludeItemTypes": "Audio",
+            "Recursive": "true",
+            "Limit": 0,  # return 0 items but populate TotalRecordCount
+        }
+        if library_id:
+            params["ParentId"] = library_id
+        async with self._client() as c:
+            r = await c.get(
+                f"{self.base_url}/Users/{self.user_id}/Items",
+                params=params,
+            )
+            r.raise_for_status()
+            return r.json().get("TotalRecordCount", 0)
+
     async def get_music_libraries(self) -> list[dict]:
         async with self._client() as c:
             r = await c.get(
