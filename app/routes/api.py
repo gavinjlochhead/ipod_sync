@@ -19,6 +19,9 @@ from app.services import rss as rss_svc
 from app.services.jellyfin import JellyfinClient
 from app.services.pinepods import PinepodsClient
 from app.services.ipod import IPodManager
+from app.services.eject import eject, EjectError
+from app.services import mqtt_pub
+from app.services import scrobbler as scrobbler_svc
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,6 +45,44 @@ async def sync_status():
     return sync_svc.get_status()
 
 
+@router.post("/sync/scrobbler")
+async def sync_scrobbler_only(db: AsyncSession = Depends(get_db)):
+    """Read .scrobbler.log from the iPod and push play history to Jellyfin."""
+    s = await cfg.get_all(db)
+    mount = s.get(cfg.IPOD_MOUNT) or IPodManager.find_ipod_mount(
+        s.get(cfg.IPOD_LABEL, "IPOD") or "IPOD"
+    )
+    if not mount:
+        raise HTTPException(404, "iPod not found")
+    entries = scrobbler_svc.parse_scrobbler_log(mount)
+    if not entries:
+        return {"ok": True, "matched": 0, "message": "No scrobbler log found"}
+    from app.database import AsyncSessionLocal
+    matched, failed = await scrobbler_svc.sync_scrobbles_to_jellyfin(entries, AsyncSessionLocal)
+    scrobbler_svc.archive_scrobbler_log(mount)
+    return {"ok": True, "matched": matched, "failed": failed,
+            "total": len([e for e in entries if e.was_played])}
+
+
+@router.post("/eject")
+async def eject_ipod(db: AsyncSession = Depends(get_db)):
+    """Safely unmount the iPod. Refuses if a sync is in progress."""
+    if sync_svc.get_status()["running"]:
+        raise HTTPException(409, "Sync is running — wait for it to finish before ejecting")
+    s = await cfg.get_all(db)
+    mount = s.get(cfg.IPOD_MOUNT) or IPodManager.find_ipod_mount(
+        s.get(cfg.IPOD_LABEL, "IPOD") or "IPOD"
+    )
+    if not mount:
+        raise HTTPException(404, "iPod mount point not found")
+    try:
+        import asyncio
+        message = await asyncio.to_thread(eject, mount)
+        return {"ok": True, "message": message}
+    except EjectError as exc:
+        raise HTTPException(500, str(exc))
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
@@ -58,6 +99,14 @@ class SettingsPayload(BaseModel):
     cache_dir: str = "/var/cache/ipod-sync/podcasts"
     music_remove_deleted: bool = False
     sync_on_connect: bool = True
+    scrobble_to_jellyfin: bool = True
+    # MQTT
+    mqtt_host: str = ""
+    mqtt_port: int = 1883
+    mqtt_username: str = ""
+    mqtt_password: str = ""
+    mqtt_prefix: str = "ipod_sync"
+    mqtt_ha_discovery: bool = True
 
 
 @router.get("/settings")
@@ -75,6 +124,13 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         "cache_dir": s.get(cfg.CACHE_DIR, "/var/cache/ipod-sync/podcasts"),
         "music_remove_deleted": s.get(cfg.MUSIC_REMOVE_DELETED, "false") == "true",
         "sync_on_connect": s.get(cfg.SYNC_ON_CONNECT, "true") == "true",
+        "scrobble_to_jellyfin": s.get(cfg.SCROBBLE_TO_JELLYFIN, "true") == "true",
+        "mqtt_host": s.get(cfg.MQTT_HOST, ""),
+        "mqtt_port": int(s.get(cfg.MQTT_PORT, "1883") or "1883"),
+        "mqtt_username": s.get(cfg.MQTT_USERNAME, ""),
+        "mqtt_password": s.get(cfg.MQTT_PASSWORD, ""),
+        "mqtt_prefix": s.get(cfg.MQTT_PREFIX, "ipod_sync"),
+        "mqtt_ha_discovery": s.get(cfg.MQTT_HA_DISCOVERY, "true") == "true",
     }
 
 
@@ -92,8 +148,106 @@ async def save_settings(payload: SettingsPayload, db: AsyncSession = Depends(get
         cfg.CACHE_DIR: payload.cache_dir,
         cfg.MUSIC_REMOVE_DELETED: "true" if payload.music_remove_deleted else "false",
         cfg.SYNC_ON_CONNECT: "true" if payload.sync_on_connect else "false",
+        cfg.SCROBBLE_TO_JELLYFIN: "true" if payload.scrobble_to_jellyfin else "false",
+        cfg.MQTT_HOST: payload.mqtt_host,
+        cfg.MQTT_PORT: str(payload.mqtt_port),
+        cfg.MQTT_USERNAME: payload.mqtt_username,
+        cfg.MQTT_PASSWORD: payload.mqtt_password,
+        cfg.MQTT_PREFIX: payload.mqtt_prefix or "ipod_sync",
+        cfg.MQTT_HA_DISCOVERY: "true" if payload.mqtt_ha_discovery else "false",
     })
+    # Re-configure MQTT if host is provided
+    if payload.mqtt_host:
+        mqtt_pub.configure(
+            host=payload.mqtt_host,
+            port=payload.mqtt_port,
+            username=payload.mqtt_username or None,
+            password=payload.mqtt_password or None,
+            prefix=payload.mqtt_prefix or "ipod_sync",
+            ha_discovery=payload.mqtt_ha_discovery,
+        )
+        if payload.mqtt_ha_discovery:
+            mqtt_pub.publish_ha_discovery()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Home Assistant status endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/ha/status")
+async def ha_status(db: AsyncSession = Depends(get_db)):
+    """
+    Single JSON endpoint for Home Assistant REST sensors.
+
+    Add to configuration.yaml:
+      sensor:
+        - platform: rest
+          resource: http://<pi-ip>:8000/api/ha/status
+          name: iPod Sync
+          json_attributes:
+            - last_sync_time
+            - last_sync_status
+            - music_on_device
+            - podcasts_on_device
+            - ipod_free_gb
+            - ipod_total_gb
+            - message
+          value_template: "{{ value_json.state }}"
+    """
+    from sqlalchemy import select
+    from app.models import SyncLog, MusicTrack, PodcastEpisode
+
+    status = sync_svc.get_status()
+
+    # Last sync log
+    last_log = await db.scalar(
+        select(SyncLog).order_by(SyncLog.started_at.desc()).limit(1)
+    )
+
+    # Device info
+    s = await cfg.get_all(db)
+    mount = s.get(cfg.IPOD_MOUNT) or IPodManager.find_ipod_mount(
+        s.get(cfg.IPOD_LABEL, "IPOD") or "IPOD"
+    )
+    ipod_connected = False
+    free_gb = None
+    total_gb = None
+    if mount:
+        ipod = IPodManager(mount)
+        if ipod.is_mounted():
+            ipod_connected = True
+            free_gb = round(ipod.free_bytes() / 1e9, 2)
+            total_gb = round(ipod.total_bytes() / 1e9, 2)
+
+    music_on_device = await db.scalar(
+        select(MusicTrack).where(MusicTrack.on_device == True)  # noqa: E712
+    )
+    podcasts_on_device = await db.scalar(
+        select(PodcastEpisode).where(PodcastEpisode.on_device == True)  # noqa: E712
+    )
+
+    from sqlalchemy import func
+    music_count = (await db.execute(
+        select(func.count()).select_from(MusicTrack).where(MusicTrack.on_device == True)  # noqa: E712
+    )).scalar() or 0
+    podcast_count = (await db.execute(
+        select(func.count()).select_from(PodcastEpisode).where(PodcastEpisode.on_device == True)  # noqa: E712
+    )).scalar() or 0
+
+    return {
+        "state": "syncing" if status["running"] else (
+            last_log.status if last_log else "idle"
+        ),
+        "last_sync_time": last_log.finished_at.isoformat() if last_log and last_log.finished_at else None,
+        "last_sync_status": last_log.status if last_log else None,
+        "music_on_device": music_count,
+        "podcasts_on_device": podcast_count,
+        "ipod_connected": ipod_connected,
+        "ipod_free_gb": free_gb,
+        "ipod_total_gb": total_gb,
+        "message": status["message"],
+    }
 
 
 # ---------------------------------------------------------------------------

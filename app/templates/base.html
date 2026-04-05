@@ -80,6 +80,9 @@
         <span id="ipod-indicator" class="badge bg-secondary">
           <i class="bi bi-usb-symbol me-1"></i>Not detected
         </span>
+        <button class="btn btn-sm btn-outline-warning" id="btn-eject" onclick="ejectIPod()" style="display:none">
+          <i class="bi bi-eject me-1"></i>Eject
+        </button>
         <button class="btn btn-sm btn-primary" id="btn-sync-now" onclick="startSync()">
           <i class="bi bi-arrow-repeat me-1"></i>Sync Now
         </button>
@@ -143,14 +146,35 @@ async function checkIPod() {
   try {
     const r = await apiFetch('/test/ipod');
     const el = document.getElementById('ipod-indicator');
+    const ejectBtn = document.getElementById('btn-eject');
     if (r.ok) {
       el.className = 'badge bg-success';
       el.innerHTML = `<i class="bi bi-usb-symbol me-1"></i>${r.free_gb}GB free`;
+      if (ejectBtn) ejectBtn.style.display = '';
     } else {
       el.className = 'badge bg-secondary';
       el.innerHTML = `<i class="bi bi-usb-symbol me-1"></i>Not detected`;
+      if (ejectBtn) ejectBtn.style.display = 'none';
     }
   } catch(e) {}
+}
+
+async function ejectIPod() {
+  const btn = document.getElementById('btn-eject');
+  if (!confirm('Safely eject the iPod?\n\nMake sure no sync is running.')) return;
+  btn.disabled = true;
+  try {
+    const r = await apiFetch('/eject', {method: 'POST'});
+    if (r.ok) {
+      alert(r.message);
+    } else {
+      alert('Eject failed: ' + (r.detail || r.message || 'Unknown error'));
+    }
+  } catch(e) {
+    alert('Eject request failed');
+  }
+  btn.disabled = false;
+  checkIPod();
 }
 
 pollSyncStatus();

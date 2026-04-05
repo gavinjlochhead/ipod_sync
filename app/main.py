@@ -13,6 +13,8 @@ from fastapi.templating import Jinja2Templates
 
 from app.database import init_db, AsyncSessionLocal
 from app.routes import web, api
+from app.services import mqtt_pub
+from app import config as cfg
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,6 +27,24 @@ log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     await init_db()
     log.info("Database initialised")
+
+    # Re-configure MQTT if previously saved
+    async with AsyncSessionLocal() as db:
+        s = await cfg.get_all(db)
+    mqtt_host = s.get(cfg.MQTT_HOST)
+    if mqtt_host:
+        mqtt_pub.configure(
+            host=mqtt_host,
+            port=int(s.get(cfg.MQTT_PORT, "1883") or "1883"),
+            username=s.get(cfg.MQTT_USERNAME) or None,
+            password=s.get(cfg.MQTT_PASSWORD) or None,
+            prefix=s.get(cfg.MQTT_PREFIX, "ipod_sync") or "ipod_sync",
+            ha_discovery=(s.get(cfg.MQTT_HA_DISCOVERY, "true") == "true"),
+        )
+        if s.get(cfg.MQTT_HA_DISCOVERY, "true") == "true":
+            mqtt_pub.publish_ha_discovery()
+        log.info("MQTT configured from saved settings")
+
     yield
 
 

@@ -25,6 +25,8 @@ from app.services.ipod import IPodManager
 from app.services.jellyfin import JellyfinClient, JellyfinTrack
 from app.services.pinepods import PinepodsClient
 from app.services import rss as rss_svc
+from app.services import scrobbler as scrobbler_svc
+from app.services import mqtt_pub
 
 log = logging.getLogger(__name__)
 
@@ -73,10 +75,24 @@ async def run_sync(session_factory: async_sessionmaker) -> None:
             if not ipod.is_mounted():
                 raise RuntimeError("iPod mount directory is empty — device not mounted?")
 
+            # Step 1: Read Rockbox scrobbler log and sync play history back to Jellyfin
+            scrobble_matched = 0
+            if (settings.get(cfg.SCROBBLE_TO_JELLYFIN, "true") or "true").lower() == "true":
+                _sync_status["message"] = "Reading play history from iPod…"
+                mqtt_pub.publish_status(_sync_status)
+                scrobble_entries = scrobbler_svc.parse_scrobbler_log(mount)
+                if scrobble_entries:
+                    scrobble_matched, _ = await scrobbler_svc.sync_scrobbles_to_jellyfin(
+                        scrobble_entries, session_factory
+                    )
+                    scrobbler_svc.archive_scrobbler_log(mount)
+
             _sync_status["message"] = "Syncing music…"
+            mqtt_pub.publish_status(_sync_status)
             music_added, music_removed = await _sync_music(session_factory, settings, ipod)
 
             _sync_status["message"] = "Syncing podcasts…"
+            mqtt_pub.publish_status(_sync_status)
             pod_added, pod_removed = await _sync_podcasts(session_factory, settings, ipod)
 
             async with session_factory() as db:
@@ -96,14 +112,19 @@ async def run_sync(session_factory: async_sessionmaker) -> None:
                 )
                 await db.commit()
 
-            _sync_status["message"] = (
+            msg = (
                 f"Done — Music +{music_added}/-{music_removed}, "
                 f"Podcasts +{pod_added}/-{pod_removed}"
             )
+            if scrobble_matched:
+                msg += f", {scrobble_matched} plays synced to Jellyfin"
+            _sync_status["message"] = msg
+            mqtt_pub.publish_status(_sync_status)
 
         except Exception as exc:
             log.exception("Sync failed: %s", exc)
             _sync_status["message"] = f"Error: {exc}"
+            mqtt_pub.publish_status(_sync_status)
             async with session_factory() as db:
                 await db.execute(
                     update(SyncLog)

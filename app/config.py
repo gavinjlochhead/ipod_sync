@@ -22,6 +22,15 @@ CACHE_DIR = "cache_dir"            # local dir for downloaded podcasts
 
 MUSIC_REMOVE_DELETED = "music_remove_deleted"  # "true"/"false"
 SYNC_ON_CONNECT = "sync_on_connect"            # "true"/"false"
+SCROBBLE_TO_JELLYFIN = "scrobble_to_jellyfin"  # "true"/"false"
+
+# MQTT / Home Assistant
+MQTT_HOST = "mqtt_host"
+MQTT_PORT = "mqtt_port"          # default 1883
+MQTT_USERNAME = "mqtt_username"
+MQTT_PASSWORD = "mqtt_password"
+MQTT_PREFIX = "mqtt_prefix"      # topic prefix, default "ipod_sync"
+MQTT_HA_DISCOVERY = "mqtt_ha_discovery"  # "true"/"false"
 
 
 async def get(db: AsyncSession, key: str, default: str | None = None) -> str | None:

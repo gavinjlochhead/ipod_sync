@@ -145,6 +145,96 @@
     </div>
   </div>
 
+  <!-- Play history / Scrobbler -->
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-music-note-list me-2"></i>Play History Sync
+      </div>
+      <div class="card-body">
+        <div class="mb-3 form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="scrobble-enabled" checked>
+          <label class="form-check-label" for="scrobble-enabled">
+            Sync play history from iPod back to Jellyfin
+          </label>
+        </div>
+        <div class="alert alert-dark-info small">
+          <i class="bi bi-info-circle me-1"></i>
+          Rockbox must have <strong>Last.fm scrobbling enabled</strong> in
+          <em>Settings → General Settings → Playback → Last.fm Log</em>.
+          This creates <code>/.scrobbler.log</code> on the iPod, which is
+          read at the start of each sync and archived afterwards.
+          Tracks are matched by title + artist and marked played in Jellyfin.
+        </div>
+        <button class="btn btn-primary" onclick="saveSettings()">
+          <i class="bi bi-floppy me-1"></i>Save
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Home Assistant / MQTT -->
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-house-gear me-2"></i>Home Assistant / MQTT</span>
+        <span id="mqtt-status" class="badge bg-secondary">Not configured</span>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Either use the <strong>REST sensor</strong> (no config needed) or publish
+          to an <strong>MQTT broker</strong> for real-time updates and auto-discovery.
+        </p>
+
+        <div class="mb-3">
+          <label class="form-label">REST endpoint (copy into HA)</label>
+          <div class="input-group">
+            <input type="text" class="form-control font-monospace" id="ha-endpoint-display" readonly>
+            <button class="btn btn-outline-secondary" onclick="copyHaUrl()">
+              <i class="bi bi-clipboard"></i>
+            </button>
+          </div>
+        </div>
+
+        <hr style="border-color:#333">
+
+        <div class="mb-3">
+          <label class="form-label">MQTT Broker Host</label>
+          <input type="text" class="form-control" id="mqtt-host" placeholder="192.168.1.x  (leave blank to disable)">
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-4">
+            <label class="form-label">Port</label>
+            <input type="number" class="form-control" id="mqtt-port" value="1883">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Username</label>
+            <input type="text" class="form-control" id="mqtt-user" placeholder="optional">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Password</label>
+            <input type="password" class="form-control" id="mqtt-pass" placeholder="optional">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Topic Prefix</label>
+          <input type="text" class="form-control" id="mqtt-prefix" value="ipod_sync">
+        </div>
+        <div class="mb-3 form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="mqtt-ha-discovery" checked>
+          <label class="form-check-label" for="mqtt-ha-discovery">
+            Publish Home Assistant MQTT auto-discovery
+          </label>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary" onclick="saveSettings()">
+            <i class="bi bi-floppy me-1"></i>Save &amp; Connect
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Save all -->
   <div class="col-12">
     <div class="d-flex gap-2">
@@ -179,9 +269,24 @@ async function loadSettings() {
   document.getElementById('ipod-label').value = s.ipod_label || 'IPOD';
   document.getElementById('cache-dir').value = s.cache_dir || '/var/cache/ipod-sync/podcasts';
   document.getElementById('sync-on-connect').checked = s.sync_on_connect !== false;
+  document.getElementById('scrobble-enabled').checked = s.scrobble_to_jellyfin !== false;
+  document.getElementById('mqtt-host').value = s.mqtt_host || '';
+  document.getElementById('mqtt-port').value = s.mqtt_port || 1883;
+  document.getElementById('mqtt-user').value = s.mqtt_username || '';
+  document.getElementById('mqtt-pass').value = s.mqtt_password || '';
+  document.getElementById('mqtt-prefix').value = s.mqtt_prefix || 'ipod_sync';
+  document.getElementById('mqtt-ha-discovery').checked = s.mqtt_ha_discovery !== false;
+
+  // HA REST endpoint display
+  document.getElementById('ha-endpoint-display').value =
+    `${window.location.protocol}//${window.location.host}/api/ha/status`;
+
+  if (s.mqtt_host) {
+    document.getElementById('mqtt-status').className = 'badge bg-success';
+    document.getElementById('mqtt-status').textContent = `${s.mqtt_host}:${s.mqtt_port}`;
+  }
 
   if (s.jellyfin_library_id) {
-    // Pre-select saved lib after loading list
     await loadJFLibs();
     document.getElementById('jf-lib').value = s.jellyfin_library_id;
   }
@@ -200,11 +305,28 @@ async function saveSettings() {
     cache_dir: document.getElementById('cache-dir').value.trim(),
     music_remove_deleted: document.getElementById('jf-remove-deleted').checked,
     sync_on_connect: document.getElementById('sync-on-connect').checked,
+    scrobble_to_jellyfin: document.getElementById('scrobble-enabled').checked,
+    mqtt_host: document.getElementById('mqtt-host').value.trim(),
+    mqtt_port: parseInt(document.getElementById('mqtt-port').value) || 1883,
+    mqtt_username: document.getElementById('mqtt-user').value.trim(),
+    mqtt_password: document.getElementById('mqtt-pass').value,
+    mqtt_prefix: document.getElementById('mqtt-prefix').value.trim() || 'ipod_sync',
+    mqtt_ha_discovery: document.getElementById('mqtt-ha-discovery').checked,
   };
   await apiFetch('/settings', {method: 'POST', body: JSON.stringify(payload)});
   const msg = document.getElementById('save-msg');
   msg.classList.remove('d-none');
   setTimeout(() => msg.classList.add('d-none'), 2500);
+
+  if (payload.mqtt_host) {
+    document.getElementById('mqtt-status').className = 'badge bg-success';
+    document.getElementById('mqtt-status').textContent = `${payload.mqtt_host}:${payload.mqtt_port}`;
+  }
+}
+
+function copyHaUrl() {
+  const url = document.getElementById('ha-endpoint-display').value;
+  navigator.clipboard.writeText(url).catch(() => {});
 }
 
 async function testJF() {

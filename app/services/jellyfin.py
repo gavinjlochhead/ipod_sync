@@ -158,3 +158,24 @@ class JellyfinClient:
                 async with aiofiles.open(dest_path, "wb") as f:
                     async for chunk in r.aiter_bytes(65536):
                         await f.write(chunk)
+
+    async def mark_played(
+        self,
+        item_id: str,
+        played_at: "datetime.datetime | None" = None,
+    ) -> None:
+        """
+        Mark a media item as played in Jellyfin.
+        Uses POST /Users/{userId}/PlayedItems/{itemId}.
+        """
+        import datetime as _dt
+        params = {}
+        if played_at:
+            # Jellyfin expects ISO-8601 with Z suffix
+            params["datePlayed"] = played_at.strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
+        async with self._client() as c:
+            r = await c.post(
+                f"{self.base_url}/Users/{self.user_id}/PlayedItems/{item_id}",
+                params=params,
+            )
+            r.raise_for_status()
