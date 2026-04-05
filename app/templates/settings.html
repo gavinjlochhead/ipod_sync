@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block title %}Settings — iPod Sync{% endblock %}
+
+{% block content %}
+<h4 class="fw-bold mb-4">Settings</h4>
+
+<div class="row g-4">
+
+  <!-- Jellyfin -->
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-collection-play me-2"></i>Jellyfin</span>
+        <span id="jf-status" class="badge bg-secondary">Not tested</span>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">Server URL</label>
+          <input type="url" class="form-control" id="jf-url" placeholder="http://192.168.1.x:8096">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">API Key</label>
+          <div class="input-group">
+            <input type="password" class="form-control" id="jf-key" placeholder="Paste your API key">
+            <button class="btn btn-outline-secondary" type="button"
+              onclick="togglePwd('jf-key')"><i class="bi bi-eye"></i></button>
+          </div>
+          <div class="form-text text-muted">
+            Dashboard → Administration → API Keys → + New
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">User ID</label>
+          <input type="text" class="form-control" id="jf-uid" placeholder="Paste user UUID">
+          <div class="form-text text-muted">
+            Found in Dashboard → Users → (your user) — the UUID in the URL.
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Music Library (optional)</label>
+          <select class="form-select" id="jf-lib">
+            <option value="">All music libraries</option>
+          </select>
+          <button class="btn btn-sm btn-outline-secondary mt-1" onclick="loadJFLibs()">
+            <i class="bi bi-arrow-clockwise me-1"></i>Load libraries
+          </button>
+        </div>
+        <div class="mb-3 form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="jf-remove-deleted">
+          <label class="form-check-label" for="jf-remove-deleted">
+            Remove tracks deleted from Jellyfin
+          </label>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-info" onclick="testJF()">
+            <i class="bi bi-wifi me-1"></i>Test
+          </button>
+          <button class="btn btn-primary" onclick="saveSettings()">
+            <i class="bi bi-floppy me-1"></i>Save
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pinepods -->
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-broadcast me-2"></i>Pinepods</span>
+        <span id="pp-status" class="badge bg-secondary">Not tested</span>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">Server URL</label>
+          <input type="url" class="form-control" id="pp-url" placeholder="http://192.168.1.x:8040">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">API Key</label>
+          <div class="input-group">
+            <input type="password" class="form-control" id="pp-key" placeholder="Paste your Pinepods API key">
+            <button class="btn btn-outline-secondary" type="button"
+              onclick="togglePwd('pp-key')"><i class="bi bi-eye"></i></button>
+          </div>
+          <div class="form-text text-muted">
+            Pinepods → Settings → API → Generate key
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-4">
+          <button class="btn btn-outline-info" onclick="testPP()">
+            <i class="bi bi-wifi me-1"></i>Test
+          </button>
+          <button class="btn btn-primary" onclick="saveSettings()">
+            <i class="bi bi-floppy me-1"></i>Save
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- iPod / Device -->
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-device-hdd me-2"></i>iPod / Device</span>
+        <span id="ipod-status-badge" class="badge bg-secondary">Not tested</span>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">Mount Point</label>
+          <input type="text" class="form-control" id="ipod-mount"
+            placeholder="/media/ipod  (leave blank to auto-detect)">
+          <div class="form-text text-muted">
+            Leave blank to auto-detect by filesystem label below.
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Filesystem Label</label>
+          <input type="text" class="form-control" id="ipod-label" value="IPOD">
+          <div class="form-text text-muted">
+            Used for auto-detection. Check with <code>lsblk -o NAME,LABEL</code>.
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Podcast Cache Directory</label>
+          <input type="text" class="form-control" id="cache-dir"
+            value="/var/cache/ipod-sync/podcasts">
+        </div>
+        <div class="mb-3 form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="sync-on-connect" checked>
+          <label class="form-check-label" for="sync-on-connect">
+            Auto-sync when iPod is plugged in
+          </label>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-outline-info" onclick="testIPod()">
+            <i class="bi bi-usb-symbol me-1"></i>Detect iPod
+          </button>
+          <button class="btn btn-primary" onclick="saveSettings()">
+            <i class="bi bi-floppy me-1"></i>Save
+          </button>
+        </div>
+        <div id="ipod-detail-settings" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save all -->
+  <div class="col-12">
+    <div class="d-flex gap-2">
+      <button class="btn btn-success btn-lg" onclick="saveSettings()">
+        <i class="bi bi-floppy me-2"></i>Save All Settings
+      </button>
+      <div id="save-msg" class="align-self-center text-success d-none">
+        <i class="bi bi-check-circle me-1"></i>Saved!
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePwd(id) {
+  const el = document.getElementById(id);
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+async function loadSettings() {
+  const s = await apiFetch('/settings');
+  document.getElementById('jf-url').value = s.jellyfin_url || '';
+  document.getElementById('jf-key').value = s.jellyfin_api_key || '';
+  document.getElementById('jf-uid').value = s.jellyfin_user_id || '';
+  document.getElementById('jf-remove-deleted').checked = s.music_remove_deleted;
+  document.getElementById('pp-url').value = s.pinepods_url || '';
+  document.getElementById('pp-key').value = s.pinepods_api_key || '';
+  document.getElementById('ipod-mount').value = s.ipod_mount || '';
+  document.getElementById('ipod-label').value = s.ipod_label || 'IPOD';
+  document.getElementById('cache-dir').value = s.cache_dir || '/var/cache/ipod-sync/podcasts';
+  document.getElementById('sync-on-connect').checked = s.sync_on_connect !== false;
+
+  if (s.jellyfin_library_id) {
+    // Pre-select saved lib after loading list
+    await loadJFLibs();
+    document.getElementById('jf-lib').value = s.jellyfin_library_id;
+  }
+}
+
+async function saveSettings() {
+  const payload = {
+    jellyfin_url: document.getElementById('jf-url').value.trim(),
+    jellyfin_api_key: document.getElementById('jf-key').value.trim(),
+    jellyfin_user_id: document.getElementById('jf-uid').value.trim(),
+    jellyfin_library_id: document.getElementById('jf-lib').value,
+    pinepods_url: document.getElementById('pp-url').value.trim(),
+    pinepods_api_key: document.getElementById('pp-key').value.trim(),
+    ipod_mount: document.getElementById('ipod-mount').value.trim(),
+    ipod_label: document.getElementById('ipod-label').value.trim() || 'IPOD',
+    cache_dir: document.getElementById('cache-dir').value.trim(),
+    music_remove_deleted: document.getElementById('jf-remove-deleted').checked,
+    sync_on_connect: document.getElementById('sync-on-connect').checked,
+  };
+  await apiFetch('/settings', {method: 'POST', body: JSON.stringify(payload)});
+  const msg = document.getElementById('save-msg');
+  msg.classList.remove('d-none');
+  setTimeout(() => msg.classList.add('d-none'), 2500);
+}
+
+async function testJF() {
+  const badge = document.getElementById('jf-status');
+  badge.className = 'badge bg-warning text-dark';
+  badge.textContent = 'Testing…';
+  await saveSettings();
+  const r = await apiFetch('/test/jellyfin', {method: 'POST'});
+  badge.className = `badge ${r.ok ? 'bg-success' : 'bg-danger'}`;
+  badge.textContent = r.message;
+}
+
+async function testPP() {
+  const badge = document.getElementById('pp-status');
+  badge.className = 'badge bg-warning text-dark';
+  badge.textContent = 'Testing…';
+  await saveSettings();
+  const r = await apiFetch('/test/pinepods', {method: 'POST'});
+  badge.className = `badge ${r.ok ? 'bg-success' : 'bg-danger'}`;
+  badge.textContent = r.message;
+}
+
+async function testIPod() {
+  const badge = document.getElementById('ipod-status-badge');
+  badge.className = 'badge bg-warning text-dark';
+  badge.textContent = 'Detecting…';
+  await saveSettings();
+  const r = await apiFetch('/test/ipod');
+  badge.className = `badge ${r.ok ? 'bg-success' : 'bg-danger'}`;
+  badge.textContent = r.message;
+  const detail = document.getElementById('ipod-detail-settings');
+  if (r.ok) {
+    const pct = Math.round((1 - r.free_gb / r.total_gb) * 100);
+    detail.innerHTML = `
+      <small class="text-muted">Mount: <code>${r.mount}</code></small><br>
+      <small class="text-muted">${r.free_gb} GB free of ${r.total_gb} GB (${pct}% used)</small>`;
+  } else {
+    detail.innerHTML = '';
+  }
+}
+
+async function loadJFLibs() {
+  const sel = document.getElementById('jf-lib');
+  await saveSettings();
+  try {
+    const libs = await apiFetch('/jellyfin/libraries');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All music libraries</option>' +
+      libs.map(l => `<option value="${l.Id}">${l.Name}</option>`).join('');
+    if (current) sel.value = current;
+  } catch(e) {
+    sel.innerHTML = '<option value="">Failed to load — check Jellyfin settings</option>';
+  }
+}
+
+loadSettings();
+</script>
+{% endblock %}

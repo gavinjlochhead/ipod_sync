@@ -1,0 +1,20 @@
+[Unit]
+Description=iPod Sync USB Detection Daemon
+After=ipod-sync.service
+Requires=ipod-sync.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ipod-sync
+Environment="IPOD_SYNC_API=http://127.0.0.1:8000"
+Environment="IPOD_LABEL=IPOD"
+ExecStart=/opt/ipod-sync/venv/bin/python daemon.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ipod-sync-daemon
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+# systemd mount unit for the iPod.
+# Copy to /etc/systemd/system/media-ipod.mount
+# Adjust What= to match your device (use LABEL=IPOD for label-based mount).
+
+[Unit]
+Description=Mount iPod at /media/ipod
+After=dev-disk-by\x2dlabel-IPOD.device
+Requires=dev-disk-by\x2dlabel-IPOD.device
+
+[Mount]
+What=/dev/disk/by-label/IPOD
+Where=/media/ipod
+Type=auto
+Options=rw,noatime,uid=ipod-sync,gid=plugdev,dmask=002,fmask=113
+
+[Install]
+WantedBy=multi-user.target

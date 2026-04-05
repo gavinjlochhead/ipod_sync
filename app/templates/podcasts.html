@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}Podcasts — iPod Sync{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="fw-bold mb-0">Podcast Subscriptions</h4>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary" onclick="importFromPinepods()">
+      <i class="bi bi-cloud-download me-1"></i>Import from Pinepods
+    </button>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
+      <i class="bi bi-plus-lg me-1"></i>Add RSS Feed
+    </button>
+  </div>
+</div>
+
+<div id="podcast-list">
+  <div class="text-center text-muted py-5">Loading…</div>
+</div>
+
+<!-- Add RSS Modal -->
+<div class="modal fade" id="addModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-rss me-2"></i>Add RSS Podcast</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Feed URL <span class="text-danger">*</span></label>
+          <input type="url" class="form-control" id="add-feed-url" placeholder="https://example.com/feed.rss">
+          <div class="form-text text-muted">The title will be auto-fetched from the feed.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Title (optional)</label>
+          <input type="text" class="form-control" id="add-feed-title" placeholder="Leave blank to auto-detect">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Max episodes to keep on device</label>
+          <input type="number" class="form-control" id="add-max-ep" value="10" min="1" max="50">
+        </div>
+        <div id="add-error" class="alert alert-danger d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" onclick="addPodcast()">
+          <i class="bi bi-plus-lg me-1"></i>Add
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Import from Pinepods Modal -->
+<div class="modal fade" id="pinepodsModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-cloud-download me-2"></i>Import from Pinepods</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="pinepods-list">
+          <div class="text-center text-muted py-3">Loading Pinepods subscriptions…</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-primary" onclick="importSelected()">
+          <i class="bi bi-cloud-download me-1"></i>Import Selected
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let podcastData = [];
+let pinepodsData = [];
+
+async function loadPodcasts() {
+  try {
+    podcastData = await apiFetch('/podcasts');
+    renderPodcasts();
+  } catch(e) {
+    document.getElementById('podcast-list').innerHTML =
+      '<div class="alert alert-danger">Failed to load podcasts</div>';
+  }
+}
+
+function renderPodcasts() {
+  const el = document.getElementById('podcast-list');
+  if (!podcastData.length) {
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-body text-center py-5 text-muted">
+          <i class="bi bi-broadcast display-4 mb-3 d-block"></i>
+          No podcast subscriptions yet.<br>
+          Add an RSS feed or import from Pinepods to get started.
+        </div>
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Podcast</th>
+              <th>Source</th>
+              <th>On Device</th>
+              <th>Max Eps</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${podcastData.map(p => `
+              <tr>
+                <td>
+                  <strong>${esc(p.title)}</strong>
+                  ${p.feed_url ? `<br><small class="text-muted">${esc(p.feed_url)}</small>` : ''}
+                </td>
+                <td>
+                  <span class="badge ${p.source==='rss' ? 'badge-source-rss' : 'badge-source-pinepods'}">
+                    ${p.source}
+                  </span>
+                </td>
+                <td>${p.on_device} / ${p.episode_count}</td>
+                <td>
+                  <input type="number" class="form-control form-control-sm"
+                    style="width:70px"
+                    value="${p.max_episodes}" min="1" max="50"
+                    onchange="updateMaxEp(${p.id}, this.value)">
+                </td>
+                <td>
+                  <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox"
+                      ${p.enabled ? 'checked' : ''}
+                      onchange="toggleEnabled(${p.id}, this.checked)">
+                  </div>
+                </td>
+                <td>
+                  <button class="btn btn-sm btn-outline-danger"
+                    onclick="deletePodcast(${p.id}, '${esc(p.title)}')">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function esc(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function addPodcast() {
+  const url = document.getElementById('add-feed-url').value.trim();
+  const title = document.getElementById('add-feed-title').value.trim();
+  const max = parseInt(document.getElementById('add-max-ep').value) || 10;
+  const errEl = document.getElementById('add-error');
+  errEl.classList.add('d-none');
+
+  if (!url) { errEl.textContent = 'Feed URL is required'; errEl.classList.remove('d-none'); return; }
+
+  try {
+    const res = await apiFetch('/podcasts', {
+      method: 'POST',
+      body: JSON.stringify({title, source: 'rss', feed_url: url, max_episodes: max})
+    });
+    if (!res.ok) {
+      errEl.textContent = res.detail || 'Failed to add podcast';
+      errEl.classList.remove('d-none');
+      return;
+    }
+    bootstrap.Modal.getInstance(document.getElementById('addModal')).hide();
+    document.getElementById('add-feed-url').value = '';
+    document.getElementById('add-feed-title').value = '';
+    document.getElementById('add-max-ep').value = '10';
+    await loadPodcasts();
+  } catch(e) {
+    errEl.textContent = 'Network error';
+    errEl.classList.remove('d-none');
+  }
+}
+
+async function deletePodcast(id, title) {
+  if (!confirm(`Remove "${title}" and all its tracked episodes?`)) return;
+  await apiFetch(`/podcasts/${id}`, {method: 'DELETE'});
+  await loadPodcasts();
+}
+
+async function updateMaxEp(id, val) {
+  await apiFetch(`/podcasts/${id}`, {method: 'PATCH', body: JSON.stringify({max_episodes: parseInt(val)})});
+}
+
+async function toggleEnabled(id, enabled) {
+  await apiFetch(`/podcasts/${id}`, {method: 'PATCH', body: JSON.stringify({enabled})});
+}
+
+async function importFromPinepods() {
+  const modal = new bootstrap.Modal(document.getElementById('pinepodsModal'));
+  modal.show();
+  const el = document.getElementById('pinepods-list');
+  el.innerHTML = '<div class="text-center text-muted py-3">Loading…</div>';
+  try {
+    pinepodsData = await apiFetch('/pinepods/podcasts');
+    if (!pinepodsData.length) {
+      el.innerHTML = '<div class="text-muted text-center py-3">No podcasts found in Pinepods.<br>Check your Pinepods settings.</div>';
+      return;
+    }
+    el.innerHTML = `
+      <table class="table table-sm">
+        <thead><tr><th><input type="checkbox" id="chk-all" onclick="toggleAll(this)"></th><th>Podcast</th><th>Max Eps</th></tr></thead>
+        <tbody>
+          ${pinepodsData.map((p,i) => `
+            <tr>
+              <td><input type="checkbox" class="pp-chk" data-idx="${i}"></td>
+              <td>${esc(p.title)}</td>
+              <td><input type="number" class="form-control form-control-sm pp-maxep" data-idx="${i}" value="10" min="1" max="50" style="width:70px"></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch(e) {
+    el.innerHTML = `<div class="alert alert-danger">Failed: ${e.message||'Check Pinepods settings'}</div>`;
+  }
+}
+
+function toggleAll(el) {
+  document.querySelectorAll('.pp-chk').forEach(c => c.checked = el.checked);
+}
+
+async function importSelected() {
+  const checks = document.querySelectorAll('.pp-chk:checked');
+  if (!checks.length) { alert('Select at least one podcast'); return; }
+
+  const existingTitles = new Set(podcastData.map(p => p.title));
+  let added = 0;
+  for (const chk of checks) {
+    const idx = parseInt(chk.dataset.idx);
+    const pod = pinepodsData[idx];
+    if (existingTitles.has(pod.title)) continue;
+    const maxEl = document.querySelector(`.pp-maxep[data-idx="${idx}"]`);
+    const maxEp = parseInt(maxEl?.value) || 10;
+    await apiFetch('/podcasts', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: pod.title,
+        source: 'pinepods',
+        feed_url: pod.feed_url || null,
+        pinepods_podcast_id: pod.id,
+        max_episodes: maxEp,
+      })
+    });
+    added++;
+  }
+  bootstrap.Modal.getInstance(document.getElementById('pinepodsModal')).hide();
+  await loadPodcasts();
+  if (added) alert(`Imported ${added} podcast(s)`);
+}
+
+loadPodcasts();
+</script>
+{% endblock %}

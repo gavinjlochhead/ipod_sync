@@ -1,0 +1,23 @@
+# udev rules for iPod Classic (original Apple VID/PID)
+# These ensure the device is accessible to the ipod-sync user
+# and that automount happens reliably.
+#
+# Apple iPod Classic USB VID = 05ac, various PIDs:
+#   0x1261 = iPod Classic (1st/2nd gen)
+#   0x1262 = iPod Classic (3rd gen)
+#   0x1263 = iPod Classic (4th gen)
+#   0x1265 = iPod Classic (5th gen / Video)
+#   0x1266 = iPod Classic (5.5th gen)
+#   0x1267 = iPod Classic (6th/7th gen)
+#
+# With Rockbox installed the device appears as a standard USB Mass
+# Storage device with the same VID/PID.
+
+ACTION=="add", SUBSYSTEM=="block", \
+  ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="1261|1262|1263|1265|1266|1267", \
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"
+
+# Fallback: match by filesystem label regardless of device identity
+# (useful if Rockbox changes how the device presents itself)
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="IPOD", \
+  TAG+="systemd", ENV{SYSTEMD_WANTS}+="media-ipod.mount"

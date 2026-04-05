@@ -1,0 +1,39 @@
+"""
+FastAPI application entry point.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from app.database import init_db, AsyncSessionLocal
+from app.routes import web, api
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+)
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    log.info("Database initialised")
+    yield
+
+
+app = FastAPI(title="iPod Sync", lifespan=lifespan)
+
+import os
+_static = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static):
+    app.mount("/static", StaticFiles(directory=_static), name="static")
+
+app.include_router(web.router)
+app.include_router(api.router, prefix="/api")

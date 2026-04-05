@@ -1,0 +1,20 @@
+[Unit]
+Description=iPod Sync Web Application
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=ipod-sync
+Group=ipod-sync
+WorkingDirectory=/opt/ipod-sync
+Environment="IPOD_SYNC_DB=/var/lib/ipod-sync/ipod_sync.db"
+ExecStart=/opt/ipod-sync/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ipod-sync
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,202 @@
+"""
+iPod / Rockbox filesystem manager.
+
+Rockbox uses a plain FAT32 filesystem — no iTunes database needed.
+Files are organized as:
+
+  <mount>/Music/<Artist>/<Album>/<NN - Title.ext>
+  <mount>/Podcasts/<Podcast Title>/<Episode Title.ext>
+
+After syncing, Rockbox will auto-update its database on next boot
+(or when "Update Now" is triggered from the main menu).
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+# Characters that are illegal in FAT32 filenames
+_ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def safe_name(s: str, max_len: int = 64) -> str:
+    """Sanitise a string for use as a FAT32 filename component."""
+    s = _ILLEGAL.sub("_", s).strip(". ")
+    return s[:max_len] or "Unknown"
+
+
+class IPodManager:
+    def __init__(self, mount_point: str):
+        self.mount = Path(mount_point)
+
+    # ------------------------------------------------------------------
+    # Mount helpers
+    # ------------------------------------------------------------------
+
+    def is_mounted(self) -> bool:
+        return self.mount.is_dir() and any(self.mount.iterdir())
+
+    @staticmethod
+    def find_ipod_mount(label: str = "IPOD") -> str | None:
+        """
+        Try to find where the iPod is mounted by its filesystem label.
+        Works on Linux (checks /proc/mounts and /media paths).
+        """
+        # Check /proc/mounts for the label
+        try:
+            with open("/proc/mounts") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        device, mount = parts[0], parts[1]
+                        # Check blkid for label
+                        try:
+                            out = subprocess.check_output(
+                                ["blkid", "-s", "LABEL", "-o", "value", device],
+                                stderr=subprocess.DEVNULL,
+                                timeout=5,
+                            ).decode().strip()
+                            if out.upper() == label.upper():
+                                return mount
+                        except Exception:
+                            pass
+        except FileNotFoundError:
+            pass
+
+        # Fallback: look under /media for a directory matching the label
+        for base in ["/media", "/mnt"]:
+            candidate = Path(base) / label
+            if candidate.is_dir():
+                return str(candidate)
+            # /media/<user>/<label>
+            if Path(base).exists():
+                for user_dir in Path(base).iterdir():
+                    candidate = user_dir / label
+                    if candidate.is_dir():
+                        return str(candidate)
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Music
+    # ------------------------------------------------------------------
+
+    def music_path(self, artist: str, album: str, filename: str) -> Path:
+        return (
+            self.mount
+            / "Music"
+            / safe_name(artist)
+            / safe_name(album)
+            / safe_name(filename)
+        )
+
+    def music_rel(self, artist: str, album: str, filename: str) -> str:
+        return str(
+            Path("Music") / safe_name(artist) / safe_name(album) / safe_name(filename)
+        )
+
+    def track_filename(self, track: "JellyfinTrack") -> str:  # type: ignore[name-defined]
+        num = f"{track.track_number:02d} - " if track.track_number else ""
+        ext = track.container if not track.container.startswith(".") else track.container[1:]
+        return f"{num}{safe_name(track.title)}.{ext}"
+
+    async def copy_music_track(self, src: str, artist: str, album: str, filename: str) -> str:
+        """Copy a local file to the iPod music tree. Returns relative path."""
+        dest = self.music_path(artist, album, filename)
+        await asyncio.to_thread(self._copy, src, dest)
+        return self.music_rel(artist, album, filename)
+
+    def remove_music_track(self, rel_path: str) -> None:
+        full = self.mount / rel_path
+        if full.exists():
+            full.unlink()
+            self._remove_empty_parents(full.parent, self.mount / "Music")
+
+    # ------------------------------------------------------------------
+    # Podcasts
+    # ------------------------------------------------------------------
+
+    def podcast_path(self, podcast_title: str, filename: str) -> Path:
+        return self.mount / "Podcasts" / safe_name(podcast_title) / safe_name(filename)
+
+    def podcast_rel(self, podcast_title: str, filename: str) -> str:
+        return str(Path("Podcasts") / safe_name(podcast_title) / safe_name(filename))
+
+    async def copy_podcast_episode(
+        self, src: str, podcast_title: str, filename: str
+    ) -> str:
+        """Copy a downloaded podcast episode to the iPod. Returns relative path."""
+        dest = self.podcast_path(podcast_title, filename)
+        await asyncio.to_thread(self._copy, src, dest)
+        return self.podcast_rel(podcast_title, filename)
+
+    def remove_podcast_episode(self, rel_path: str) -> None:
+        full = self.mount / rel_path
+        if full.exists():
+            full.unlink()
+            self._remove_empty_parents(full.parent, self.mount / "Podcasts")
+
+    # ------------------------------------------------------------------
+    # Free space
+    # ------------------------------------------------------------------
+
+    def free_bytes(self) -> int:
+        stat = shutil.disk_usage(self.mount)
+        return stat.free
+
+    def total_bytes(self) -> int:
+        stat = shutil.disk_usage(self.mount)
+        return stat.total
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _copy(src: str, dest: Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        shutil.copy2(src, tmp)
+        tmp.rename(dest)
+        log.debug("Copied %s → %s", src, dest)
+
+    @staticmethod
+    def _remove_empty_parents(directory: Path, stop_at: Path) -> None:
+        """Walk up, removing empty directories until stop_at."""
+        try:
+            while directory != stop_at and directory.exists():
+                if not any(directory.iterdir()):
+                    directory.rmdir()
+                    directory = directory.parent
+                else:
+                    break
+        except Exception as exc:
+            log.debug("Could not clean up empty dir: %s", exc)
+
+    def list_music_files(self) -> set[str]:
+        """Return a set of relative paths for all files under Music/."""
+        root = self.mount / "Music"
+        if not root.exists():
+            return set()
+        return {
+            str(p.relative_to(self.mount))
+            for p in root.rglob("*")
+            if p.is_file()
+        }
+
+    def list_podcast_files(self) -> set[str]:
+        root = self.mount / "Podcasts"
+        if not root.exists():
+            return set()
+        return {
+            str(p.relative_to(self.mount))
+            for p in root.rglob("*")
+            if p.is_file()
+        }

@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — iPod Sync{% endblock %}
+
+{% block content %}
+<h4 class="mb-4 fw-bold">Dashboard</h4>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card stat-card h-100 text-center py-3">
+      <div class="card-body">
+        <div class="card-title">Music Tracks</div>
+        <div class="display-6" id="stat-music-total">—</div>
+        <small class="text-muted" id="stat-music-device">— on device</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card h-100 text-center py-3">
+      <div class="card-body">
+        <div class="card-title">Podcasts</div>
+        <div class="display-6" id="stat-pod-count">—</div>
+        <small class="text-muted" id="stat-pod-episodes">— episodes on device</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card h-100 text-center py-3">
+      <div class="card-body">
+        <div class="card-title">Free Space</div>
+        <div class="display-6" id="stat-free">—</div>
+        <small class="text-muted" id="stat-total">— total</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card h-100 text-center py-3">
+      <div class="card-body">
+        <div class="card-title">Last Sync</div>
+        <div class="display-6" id="stat-last-sync" style="font-size:1.1rem;margin-top:.4rem">—</div>
+        <small class="text-muted" id="stat-last-status"></small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- Recent sync logs -->
+  <div class="col-12 col-lg-8">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history me-2"></i>Recent Syncs</span>
+        <a href="/logs" class="btn btn-sm btn-outline-secondary">View all</a>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th>Time</th><th>Status</th><th>Music</th><th>Podcasts</th><th>Note</th>
+            </tr>
+          </thead>
+          <tbody id="log-table-body">
+            <tr><td colspan="5" class="text-center text-muted py-3">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick actions -->
+  <div class="col-12 col-lg-4">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-lightning me-2"></i>Quick Actions</div>
+      <div class="card-body d-grid gap-2">
+        <button class="btn btn-primary" onclick="startSync()">
+          <i class="bi bi-arrow-repeat me-2"></i>Start Sync Now
+        </button>
+        <a href="/podcasts" class="btn btn-outline-secondary">
+          <i class="bi bi-plus-circle me-2"></i>Add Podcast
+        </a>
+        <a href="/settings" class="btn btn-outline-secondary">
+          <i class="bi bi-gear me-2"></i>Configure Sources
+        </a>
+      </div>
+    </div>
+
+    <div class="card mt-3">
+      <div class="card-header"><i class="bi bi-info-circle me-2"></i>iPod Status</div>
+      <div class="card-body" id="ipod-detail">
+        <div class="text-muted">Checking…</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function statusBadge(s) {
+  const m = {success:'bg-success',error:'bg-danger',running:'bg-warning text-dark',cancelled:'bg-secondary'};
+  return `<span class="badge ${m[s]||'bg-secondary'}">${s}</span>`;
+}
+
+async function loadDashboard() {
+  // Music stats
+  try {
+    const m = await apiFetch('/music/stats');
+    document.getElementById('stat-music-total').textContent = m.total.toLocaleString();
+    document.getElementById('stat-music-device').textContent = `${m.on_device.toLocaleString()} on device`;
+  } catch(e) {}
+
+  // Podcast stats
+  try {
+    const pods = await apiFetch('/podcasts');
+    const epOnDevice = pods.reduce((a,p) => a + p.on_device, 0);
+    document.getElementById('stat-pod-count').textContent = pods.length;
+    document.getElementById('stat-pod-episodes').textContent = `${epOnDevice} episodes on device`;
+  } catch(e) {}
+
+  // iPod detail
+  try {
+    const ipod = await apiFetch('/test/ipod');
+    const el = document.getElementById('ipod-detail');
+    if (ipod.ok) {
+      const pct = Math.round((1 - ipod.free_gb / ipod.total_gb) * 100);
+      el.innerHTML = `
+        <div class="mb-2"><strong>Mount:</strong> <code>${ipod.mount}</code></div>
+        <div class="mb-1 d-flex justify-content-between">
+          <small>${ipod.free_gb} GB free of ${ipod.total_gb} GB</small>
+          <small>${pct}% used</small>
+        </div>
+        <div class="progress" style="height:6px">
+          <div class="progress-bar bg-info" style="width:${pct}%"></div>
+        </div>`;
+      document.getElementById('stat-free').textContent = `${ipod.free_gb}G`;
+      document.getElementById('stat-total').textContent = `${ipod.total_gb} GB total`;
+    } else {
+      el.innerHTML = `<span class="text-muted">${ipod.message}</span>`;
+      document.getElementById('stat-free').textContent = '—';
+    }
+  } catch(e) {}
+
+  // Logs
+  try {
+    const logs = await apiFetch('/logs?limit=5');
+    const tbody = document.getElementById('log-table-body');
+    if (!logs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No syncs yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = logs.map(l => `
+      <tr>
+        <td><small>${fmtDate(l.started_at)}</small></td>
+        <td>${statusBadge(l.status)}</td>
+        <td><small>+${l.music_added}/-${l.music_removed}</small></td>
+        <td><small>+${l.podcasts_added}/-${l.podcasts_removed}</small></td>
+        <td><small class="text-muted">${l.message||''}</small></td>
+      </tr>`).join('');
+
+    const last = logs[0];
+    document.getElementById('stat-last-sync').textContent = fmtDate(last.started_at);
+    document.getElementById('stat-last-status').innerHTML = statusBadge(last.status);
+  } catch(e) {}
+}
+
+loadDashboard();
+setInterval(loadDashboard, 15000);
+</script>
+{% endblock %}
