@@ -18,19 +18,30 @@ import os
 import re
 import shutil
 import subprocess
+import unicodedata
 import uuid
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# Characters that are illegal in FAT32 filenames, plus apostrophe which
-# causes [Errno 22] Invalid argument on some vfat mounts (e.g. Linux/vfat
-# with certain iocharset settings).
-_ILLEGAL = re.compile(r"[<>:\"/\\|?*'\x00-\x1f]")
+# Characters that are illegal on FAT32/vfat, plus apostrophe (both ASCII U+0027
+# and any residual after Unicode normalisation) which triggers [Errno 22] on
+# some vfat mounts.
+_ILLEGAL = re.compile(r"[<>:\"'/\\|?*\x00-\x1f]")
 
 
 def safe_name(s: str, max_len: int = 64) -> str:
-    """Sanitise a string for use as a FAT32 filename component."""
+    """Sanitise a string for use as a FAT32 filename component.
+
+    Normalises Unicode to ASCII (NFKD decomposition) so that smart quotes,
+    accented letters and other non-ASCII chars don't cause [Errno 22] on
+    vfat mounts that lack UTF-8 support.  Illegal FAT32 characters are then
+    replaced with underscores.
+    """
+    # NFKD decomposes combined chars (é → e + combining accent); encoding to
+    # ASCII with 'ignore' strips the non-ASCII residue (accents, smart quotes,
+    # etc.), leaving plain ASCII equivalents where possible.
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
     s = _ILLEGAL.sub("_", s).strip(". ")
     return s[:max_len] or "Unknown"
 
