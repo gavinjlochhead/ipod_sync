@@ -31,19 +31,40 @@ _ILLEGAL = re.compile(r"[<>:\"'/\\|?*\x00-\x1f]")
 
 
 def safe_name(s: str, max_len: int = 64) -> str:
-    """Sanitise a string for use as a FAT32 filename component.
+    """Sanitise a string for use as a FAT32 directory-name component.
 
     Normalises Unicode to ASCII (NFKD decomposition) so that smart quotes,
     accented letters and other non-ASCII chars don't cause [Errno 22] on
     vfat mounts that lack UTF-8 support.  Illegal FAT32 characters are then
     replaced with underscores.
+
+    Strip is applied both before AND after truncation so the result never
+    ends with a space or dot (FAT32 forbids both).
     """
     # NFKD decomposes combined chars (é → e + combining accent); encoding to
     # ASCII with 'ignore' strips the non-ASCII residue (accents, smart quotes,
     # etc.), leaving plain ASCII equivalents where possible.
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
     s = _ILLEGAL.sub("_", s).strip(". ")
-    return s[:max_len] or "Unknown"
+    return s[:max_len].strip(". ") or "Unknown"
+
+
+def safe_filename(s: str) -> str:
+    """Sanitise a complete filename (stem + extension) for FAT32.
+
+    Unlike safe_name, this does not truncate the stem — it preserves the
+    extension and only shortens the stem if the total would exceed 255 chars
+    (the FAT32 LFN limit per path component).
+    """
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    s = _ILLEGAL.sub("_", s).strip(". ")
+    if len(s) <= 255:
+        return s or "Unknown"
+    # Preserve the extension when truncating.
+    p = Path(s)
+    ext = p.suffix          # e.g. ".mp3"
+    stem = p.stem[:255 - len(ext)].strip(". ")
+    return (stem + ext) or "Unknown"
 
 
 class IPodManager:
@@ -121,12 +142,12 @@ class IPodManager:
             / "Music"
             / safe_name(artist)
             / safe_name(album)
-            / safe_name(filename)
+            / safe_filename(filename)
         )
 
     def music_rel(self, artist: str, album: str, filename: str) -> str:
         return str(
-            Path("Music") / safe_name(artist) / safe_name(album) / safe_name(filename)
+            Path("Music") / safe_name(artist) / safe_name(album) / safe_filename(filename)
         )
 
     def track_filename(self, track: "JellyfinTrack") -> str:  # type: ignore[name-defined]
@@ -151,10 +172,10 @@ class IPodManager:
     # ------------------------------------------------------------------
 
     def podcast_path(self, podcast_title: str, filename: str) -> Path:
-        return self.mount / "Podcasts" / safe_name(podcast_title) / safe_name(filename)
+        return self.mount / "Podcasts" / safe_name(podcast_title) / safe_filename(filename)
 
     def podcast_rel(self, podcast_title: str, filename: str) -> str:
-        return str(Path("Podcasts") / safe_name(podcast_title) / safe_name(filename))
+        return str(Path("Podcasts") / safe_name(podcast_title) / safe_filename(filename))
 
     async def copy_podcast_episode(
         self, src: str, podcast_title: str, filename: str
