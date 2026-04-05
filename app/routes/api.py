@@ -341,6 +341,57 @@ async def pinepods_podcasts(db: AsyncSession = Depends(get_db)):
         raise HTTPException(500, str(exc))
 
 
+@router.get("/pinepods/debug")
+async def pinepods_debug(db: AsyncSession = Depends(get_db)):
+    """
+    Returns the raw Pinepods API responses for debugging.
+    Useful when podcasts don't show up — shows exactly what the server returns.
+    """
+    import httpx as _httpx
+    s = await cfg.get_all(db)
+    url = s.get(cfg.PINEPODS_URL)
+    key = s.get(cfg.PINEPODS_API_KEY)
+    if not url or not key:
+        raise HTTPException(400, "Pinepods not configured")
+
+    results: dict = {}
+    headers = {"Api-Key": key}
+    base = url.rstrip("/")
+
+    async with _httpx.AsyncClient(headers=headers, timeout=15) as c:
+        # 1. Check connectivity
+        try:
+            r = await c.get(f"{base}/api/pinepods_check")
+            results["pinepods_check"] = {"status": r.status_code, "body": r.text[:500]}
+        except Exception as exc:
+            results["pinepods_check"] = {"error": str(exc)}
+
+        # 2. Resolve user ID
+        user_id = None
+        try:
+            r = await c.get(f"{base}/api/data/get_user")
+            results["get_user"] = {"status": r.status_code, "body": r.json()}
+            user_id = r.json().get("retrieved_id")
+        except Exception as exc:
+            results["get_user"] = {"error": str(exc)}
+
+        # 3. Fetch podcasts
+        if user_id:
+            try:
+                r = await c.get(f"{base}/api/data/return_pods/{user_id}")
+                body = r.json()
+                results["return_pods"] = {
+                    "status": r.status_code,
+                    "pod_count": len(body.get("pods", [])),
+                    "first_pod_keys": list(body["pods"][0].keys()) if body.get("pods") else [],
+                    "first_pod": body["pods"][0] if body.get("pods") else None,
+                }
+            except Exception as exc:
+                results["return_pods"] = {"error": str(exc)}
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Podcast subscriptions
 # ---------------------------------------------------------------------------
