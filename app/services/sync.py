@@ -95,6 +95,10 @@ async def run_sync(session_factory: async_sessionmaker) -> None:
             mqtt_pub.publish_status(_sync_status)
             pod_added, pod_removed = await _sync_podcasts(session_factory, settings, ipod)
 
+            # Signal Rockbox to rebuild its database on next boot so newly
+            # copied tracks appear in the library (not just the file browser).
+            ipod.trigger_database_update()
+
             async with session_factory() as db:
                 await db.execute(
                     update(SyncLog)

@@ -22,8 +22,10 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# Characters that are illegal in FAT32 filenames
-_ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# Characters that are illegal in FAT32 filenames, plus apostrophe which
+# causes [Errno 22] Invalid argument on some vfat mounts (e.g. Linux/vfat
+# with certain iocharset settings).
+_ILLEGAL = re.compile(r"[<>:\"/\\|?*'\x00-\x1f]")
 
 
 def safe_name(s: str, max_len: int = 64) -> str:
@@ -192,6 +194,21 @@ class IPodManager:
                     break
         except Exception as exc:
             log.debug("Could not clean up empty dir: %s", exc)
+
+    def trigger_database_update(self) -> None:
+        """
+        Signal Rockbox to rebuild its music database on next boot.
+
+        Rockbox watches for /.rockbox/database_rebuild at startup; when the
+        file exists it performs a full database scan and then removes it.
+        """
+        flag = self.mount / ".rockbox" / "database_rebuild"
+        try:
+            flag.parent.mkdir(parents=True, exist_ok=True)
+            flag.touch()
+            log.info("Touched %s — Rockbox will rebuild its database on next boot", flag)
+        except Exception as exc:
+            log.warning("Could not create database_rebuild flag: %s", exc)
 
     def list_music_files(self) -> set[str]:
         """Return a set of relative paths for all files under Music/."""
