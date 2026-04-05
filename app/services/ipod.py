@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -177,7 +178,11 @@ class IPodManager:
     @staticmethod
     def _copy(src: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_suffix(dest.suffix + ".part")
+        # Use a UUID-based temp name so the temp file never contains characters
+        # that are invalid on the FAT32/vfat mount (e.g. apostrophes in track
+        # titles cause [Errno 22] Invalid argument when the temp name is derived
+        # from the destination filename).
+        tmp = dest.parent / f".{uuid.uuid4().hex}.part"
         shutil.copy2(src, tmp)
         tmp.rename(dest)
         log.debug("Copied %s → %s", src, dest)
