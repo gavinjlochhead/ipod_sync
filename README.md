@@ -2,6 +2,9 @@
 
 Raspberry Pi app that automatically syncs your Jellyfin music library and
 podcast subscriptions (Pinepods or RSS) to an iPod Classic running Rockbox.
+Also runs on a Bazzite handheld (e.g. ROG Ally) so you can sync away from
+home over Tailscale — see [Installing on Bazzite](#installing-on-bazzite-rog-ally-etc)
+below.
 
 ## Features
 
@@ -29,6 +32,34 @@ sudo bash install.sh
 ```
 
 Then open `http://<pi-ip>:8000` in your browser.
+
+## Installing on Bazzite (ROG Ally, etc.)
+
+The app itself doesn't care what it runs on — the only hard requirement
+is that the **iPod is plugged into the same machine running the daemon**,
+since syncing works by mounting the iPod's onboard filesystem and writing
+files to it directly (not over the network). Jellyfin/Pinepods, on the
+other hand, are just HTTP APIs, so if your handheld reaches your home
+server over Tailscale, syncing away from home works exactly like it does
+on the Pi at home — just point the Jellyfin/Pinepods URLs in Settings at
+your home server's Tailscale IP or MagicDNS name.
+
+Bazzite is an immutable, rpm-ostree-based image (no `apt-get`), so use
+`install-bazzite.sh` instead of `install.sh`:
+
+```bash
+git clone <repo-url> ~/ipod-sync-src
+cd ~/ipod-sync-src
+sudo bash install-bazzite.sh
+```
+
+It installs the same systemd services, udev rules, and sudoers file as
+the Pi installer — `/etc` is writable on ostree systems, so none of that
+needs special handling. The only difference is dependency handling: it
+checks whether `rsync`, `udisks2`, `util-linux`, and `python3` are already
+part of the base image (they usually are) and only layers anything
+missing via `rpm-ostree install --apply-live`. If a layered package needs
+a reboot to fully take effect, the installer will tell you.
 
 ## Quick Start
 
