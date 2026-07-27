@@ -29,6 +29,12 @@ log = logging.getLogger(__name__)
 # some vfat mounts.
 _ILLEGAL = re.compile(r"[<>:\"'/\\|?*\x00-\x1f]")
 
+# Markers delimiting the auto-generated block inside .rockbox/shortcuts.txt
+# so we can regenerate it each sync without clobbering shortcuts the user
+# added by hand elsewhere in the file.
+_SHORTCUTS_BEGIN = "# --- ipod-sync: podcast shortcuts (auto-generated, do not edit below) ---"
+_SHORTCUTS_END = "# --- ipod-sync: end podcast shortcuts ---"
+
 
 def safe_name(s: str, max_len: int = 64) -> str:
     """Sanitise a string for use as a FAT32 directory-name component.
@@ -202,6 +208,64 @@ class IPodManager:
         dest = self.podcast_path(podcast_title, filename)
         await asyncio.to_thread(self._copy, src, dest)
         return self.podcast_rel(podcast_title, filename)
+
+    def write_podcast_shortcuts(self) -> None:
+        """
+        Maintain a "Podcasts" section in .rockbox/shortcuts.txt: one
+        shortcut per podcast show currently on the device, each linking
+        straight to its Podcasts/<Show> folder. This gives an Apple
+        Podcasts-style flow (pick a show, then pick an episode) as a
+        single tap from Rockbox's Shortcuts root-menu item, instead of
+        drilling through Files -> Podcasts -> <Show> every time.
+
+        Since database.ignore keeps podcasts out of the tag database (see
+        ensure_podcast_ignore), Shortcuts is the only way to give them a
+        dedicated browse entry. Rockbox doesn't enable "Shortcuts" in its
+        root menu by default — it must be added once on the device under
+        Settings > General Settings > Root Menu.
+
+        Any shortcuts outside our marked section (e.g. ones the user
+        added by hand) are preserved as-is.
+        """
+        podcasts_dir = self.mount / "Podcasts"
+        shortcuts_file = self.mount / ".rockbox" / "shortcuts.txt"
+
+        shows = sorted(
+            p.name for p in podcasts_dir.iterdir() if p.is_dir()
+        ) if podcasts_dir.is_dir() else []
+
+        block_lines = [_SHORTCUTS_BEGIN]
+        for show in shows:
+            block_lines += [
+                "[shortcut]",
+                "type: browse",
+                f"data: /Podcasts/{show}",
+                f"name: {show[:64]}",
+            ]
+        block_lines.append(_SHORTCUTS_END)
+        block = "\n".join(block_lines)
+
+        try:
+            existing = (
+                shortcuts_file.read_text(encoding="utf-8")
+                if shortcuts_file.exists() else ""
+            )
+        except Exception:
+            existing = ""
+
+        if _SHORTCUTS_BEGIN in existing and _SHORTCUTS_END in existing:
+            pre, _, rest = existing.partition(_SHORTCUTS_BEGIN)
+            _, _, post = rest.partition(_SHORTCUTS_END)
+            new_content = pre + block + post
+        else:
+            sep = "\n" if existing and not existing.endswith("\n") else ""
+            new_content = existing + sep + block + "\n"
+
+        try:
+            shortcuts_file.parent.mkdir(parents=True, exist_ok=True)
+            shortcuts_file.write_text(new_content, encoding="utf-8")
+        except Exception as exc:
+            log.warning("Could not write shortcuts.txt: %s", exc)
 
     def remove_podcast_episode(self, rel_path: str) -> None:
         full = self.mount / rel_path

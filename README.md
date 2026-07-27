@@ -50,7 +50,20 @@ Rockbox scans these automatically and builds its database on boot.
 `Podcasts/` contains a `database.ignore` marker (created automatically by
 the sync) so podcast episodes are excluded from Rockbox's tag Database —
 otherwise their ID3 artist tags (the show name) would show up mixed in
-with music artists. Podcasts stay browsable via Files → Podcasts.
+with music artists.
+
+### Browsing podcasts by show (Apple Podcasts-style)
+
+Since podcasts are excluded from the Database, the sync also maintains
+`.rockbox/shortcuts.txt` with one shortcut per podcast show, each linking
+straight to that show's episode folder — so picking a show and then an
+episode is the same flow as Apple's stock Podcasts app.
+
+Rockbox doesn't show its **Shortcuts** menu by default, so enable it once
+on the device: **Settings → General Settings → Root Menu**, add
+`Shortcuts` to the menu order. After that, every sync keeps the shortcut
+list up to date automatically. (Any shortcuts you add by hand elsewhere in
+that file are left alone.)
 
 ## Services
 
