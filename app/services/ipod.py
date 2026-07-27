@@ -29,6 +29,12 @@ log = logging.getLogger(__name__)
 # some vfat mounts.
 _ILLEGAL = re.compile(r"[<>:\"'/\\|?*\x00-\x1f]")
 
+# Markers delimiting the auto-generated block inside .rockbox/shortcuts.txt
+# so we can regenerate it each sync without clobbering shortcuts the user
+# added by hand elsewhere in the file.
+_SHORTCUTS_BEGIN = "# --- ipod-sync: podcasts shortcut (auto-generated, do not edit below) ---"
+_SHORTCUTS_END = "# --- ipod-sync: end podcasts shortcut ---"
+
 
 def safe_name(s: str, max_len: int = 64) -> str:
     """Sanitise a string for use as a FAT32 directory-name component.
@@ -177,6 +183,24 @@ class IPodManager:
     def podcast_rel(self, podcast_title: str, filename: str) -> str:
         return str(Path("Podcasts") / safe_name(podcast_title) / safe_filename(filename))
 
+    def ensure_podcast_ignore(self) -> None:
+        """
+        Exclude Podcasts/ from Rockbox's tag database.
+
+        Rockbox's Database (Artist/Album browsing) is built from ID3 tags
+        scanned across the whole disk, not from folder structure. Podcast
+        episodes keep the ID3 "artist" tag from the source feed (the show
+        name), so without this they get lumped into the Artist list next to
+        real music artists. `database.ignore` tells Rockbox's tagcache
+        scanner to skip this subtree; podcasts stay reachable via Files.
+        """
+        podcasts_dir = self.mount / "Podcasts"
+        try:
+            podcasts_dir.mkdir(parents=True, exist_ok=True)
+            (podcasts_dir / "database.ignore").touch()
+        except Exception as exc:
+            log.warning("Could not create database.ignore in Podcasts/: %s", exc)
+
     async def copy_podcast_episode(
         self, src: str, podcast_title: str, filename: str
     ) -> str:
@@ -184,6 +208,57 @@ class IPodManager:
         dest = self.podcast_path(podcast_title, filename)
         await asyncio.to_thread(self._copy, src, dest)
         return self.podcast_rel(podcast_title, filename)
+
+    def ensure_podcast_shortcut(self) -> None:
+        """
+        Maintain a single "Podcasts" entry in .rockbox/shortcuts.txt that
+        links to the Podcasts/ folder. Tapping it opens a folder listing of
+        every show, and tapping a show lists its episodes — an Apple
+        Podcasts-style "pick a show, then pick an episode" flow, one tap
+        from Rockbox's Shortcuts root-menu item, instead of drilling
+        through Files -> Podcasts every time.
+
+        Since database.ignore keeps podcasts out of the tag database (see
+        ensure_podcast_ignore), Shortcuts is the only way to give them a
+        dedicated browse entry. Rockbox doesn't enable "Shortcuts" in its
+        root menu by default — it must be added once on the device under
+        Settings > General Settings > Root Menu.
+
+        Any shortcuts outside our marked section (e.g. ones the user
+        added by hand) are preserved as-is.
+        """
+        shortcuts_file = self.mount / ".rockbox" / "shortcuts.txt"
+
+        block = "\n".join([
+            _SHORTCUTS_BEGIN,
+            "[shortcut]",
+            "type: browse",
+            "data: /Podcasts",
+            "name: Podcasts",
+            _SHORTCUTS_END,
+        ])
+
+        try:
+            existing = (
+                shortcuts_file.read_text(encoding="utf-8")
+                if shortcuts_file.exists() else ""
+            )
+        except Exception:
+            existing = ""
+
+        if _SHORTCUTS_BEGIN in existing and _SHORTCUTS_END in existing:
+            pre, _, rest = existing.partition(_SHORTCUTS_BEGIN)
+            _, _, post = rest.partition(_SHORTCUTS_END)
+            new_content = pre + block + post
+        else:
+            sep = "\n" if existing and not existing.endswith("\n") else ""
+            new_content = existing + sep + block + "\n"
+
+        try:
+            shortcuts_file.parent.mkdir(parents=True, exist_ok=True)
+            shortcuts_file.write_text(new_content, encoding="utf-8")
+        except Exception as exc:
+            log.warning("Could not write shortcuts.txt: %s", exc)
 
     def remove_podcast_episode(self, rel_path: str) -> None:
         full = self.mount / rel_path

@@ -47,6 +47,23 @@ Then open `http://<pi-ip>:8000` in your browser.
 ```
 
 Rockbox scans these automatically and builds its database on boot.
+`Podcasts/` contains a `database.ignore` marker (created automatically by
+the sync) so podcast episodes are excluded from Rockbox's tag Database —
+otherwise their ID3 artist tags (the show name) would show up mixed in
+with music artists.
+
+### Browsing podcasts by show (Apple Podcasts-style)
+
+Since podcasts are excluded from the Database, the sync also maintains a
+single **"Podcasts"** entry in `.rockbox/shortcuts.txt` that links to the
+`Podcasts/` folder. Opening it lists every show, and opening a show lists
+its episodes — the same "pick a show, then an episode" flow as Apple's
+stock Podcasts app.
+
+Rockbox doesn't show its **Shortcuts** menu by default, so enable it once
+on the device: **Settings → General Settings → Root Menu**, add
+`Shortcuts` to the menu order. (Any shortcuts you add by hand elsewhere in
+that file are left alone.)
 
 ## Services
 

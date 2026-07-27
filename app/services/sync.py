@@ -75,6 +75,8 @@ async def run_sync(session_factory: async_sessionmaker) -> None:
             if not ipod.is_mounted():
                 raise RuntimeError("iPod mount directory is empty — device not mounted?")
 
+            ipod.ensure_podcast_ignore()
+
             # Step 1: Read Rockbox scrobbler log and sync play history back to Jellyfin
             scrobble_matched = 0
             if (settings.get(cfg.SCROBBLE_TO_JELLYFIN, "true") or "true").lower() == "true":
@@ -94,6 +96,7 @@ async def run_sync(session_factory: async_sessionmaker) -> None:
             _sync_status["message"] = "Syncing podcasts…"
             mqtt_pub.publish_status(_sync_status)
             pod_added, pod_removed = await _sync_podcasts(session_factory, settings, ipod)
+            ipod.ensure_podcast_shortcut()
 
             # Signal Rockbox to rebuild its database on next boot so newly
             # copied tracks appear in the library (not just the file browser).
