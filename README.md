@@ -54,15 +54,15 @@ with music artists.
 
 ### Browsing podcasts by show (Apple Podcasts-style)
 
-Since podcasts are excluded from the Database, the sync also maintains
-`.rockbox/shortcuts.txt` with one shortcut per podcast show, each linking
-straight to that show's episode folder — so picking a show and then an
-episode is the same flow as Apple's stock Podcasts app.
+Since podcasts are excluded from the Database, the sync also maintains a
+single **"Podcasts"** entry in `.rockbox/shortcuts.txt` that links to the
+`Podcasts/` folder. Opening it lists every show, and opening a show lists
+its episodes — the same "pick a show, then an episode" flow as Apple's
+stock Podcasts app.
 
 Rockbox doesn't show its **Shortcuts** menu by default, so enable it once
 on the device: **Settings → General Settings → Root Menu**, add
-`Shortcuts` to the menu order. After that, every sync keeps the shortcut
-list up to date automatically. (Any shortcuts you add by hand elsewhere in
+`Shortcuts` to the menu order. (Any shortcuts you add by hand elsewhere in
 that file are left alone.)
 
 ## Services

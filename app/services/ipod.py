@@ -32,8 +32,8 @@ _ILLEGAL = re.compile(r"[<>:\"'/\\|?*\x00-\x1f]")
 # Markers delimiting the auto-generated block inside .rockbox/shortcuts.txt
 # so we can regenerate it each sync without clobbering shortcuts the user
 # added by hand elsewhere in the file.
-_SHORTCUTS_BEGIN = "# --- ipod-sync: podcast shortcuts (auto-generated, do not edit below) ---"
-_SHORTCUTS_END = "# --- ipod-sync: end podcast shortcuts ---"
+_SHORTCUTS_BEGIN = "# --- ipod-sync: podcasts shortcut (auto-generated, do not edit below) ---"
+_SHORTCUTS_END = "# --- ipod-sync: end podcasts shortcut ---"
 
 
 def safe_name(s: str, max_len: int = 64) -> str:
@@ -209,14 +209,14 @@ class IPodManager:
         await asyncio.to_thread(self._copy, src, dest)
         return self.podcast_rel(podcast_title, filename)
 
-    def write_podcast_shortcuts(self) -> None:
+    def ensure_podcast_shortcut(self) -> None:
         """
-        Maintain a "Podcasts" section in .rockbox/shortcuts.txt: one
-        shortcut per podcast show currently on the device, each linking
-        straight to its Podcasts/<Show> folder. This gives an Apple
-        Podcasts-style flow (pick a show, then pick an episode) as a
-        single tap from Rockbox's Shortcuts root-menu item, instead of
-        drilling through Files -> Podcasts -> <Show> every time.
+        Maintain a single "Podcasts" entry in .rockbox/shortcuts.txt that
+        links to the Podcasts/ folder. Tapping it opens a folder listing of
+        every show, and tapping a show lists its episodes — an Apple
+        Podcasts-style "pick a show, then pick an episode" flow, one tap
+        from Rockbox's Shortcuts root-menu item, instead of drilling
+        through Files -> Podcasts every time.
 
         Since database.ignore keeps podcasts out of the tag database (see
         ensure_podcast_ignore), Shortcuts is the only way to give them a
@@ -227,23 +227,16 @@ class IPodManager:
         Any shortcuts outside our marked section (e.g. ones the user
         added by hand) are preserved as-is.
         """
-        podcasts_dir = self.mount / "Podcasts"
         shortcuts_file = self.mount / ".rockbox" / "shortcuts.txt"
 
-        shows = sorted(
-            p.name for p in podcasts_dir.iterdir() if p.is_dir()
-        ) if podcasts_dir.is_dir() else []
-
-        block_lines = [_SHORTCUTS_BEGIN]
-        for show in shows:
-            block_lines += [
-                "[shortcut]",
-                "type: browse",
-                f"data: /Podcasts/{show}",
-                f"name: {show[:64]}",
-            ]
-        block_lines.append(_SHORTCUTS_END)
-        block = "\n".join(block_lines)
+        block = "\n".join([
+            _SHORTCUTS_BEGIN,
+            "[shortcut]",
+            "type: browse",
+            "data: /Podcasts",
+            "name: Podcasts",
+            _SHORTCUTS_END,
+        ])
 
         try:
             existing = (
