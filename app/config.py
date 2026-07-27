@@ -32,6 +32,15 @@ MQTT_PASSWORD = "mqtt_password"
 MQTT_PREFIX = "mqtt_prefix"      # topic prefix, default "ipod_sync"
 MQTT_HA_DISCOVERY = "mqtt_ha_discovery"  # "true"/"false"
 
+# GPIO hardware buttons/LEDs (Raspberry Pi, BCM pin numbering)
+GPIO_ENABLED = "gpio_enabled"                        # "true"/"false"
+GPIO_BUTTON_MOUNT_PIN = "gpio_button_mount_pin"
+GPIO_BUTTON_UNMOUNT_PIN = "gpio_button_unmount_pin"
+GPIO_BUTTON_SYNC_PIN = "gpio_button_sync_pin"
+GPIO_LED_MOUNTED_PIN = "gpio_led_mounted_pin"
+GPIO_LED_REMOVABLE_PIN = "gpio_led_removable_pin"
+GPIO_LED_SYNCING_PIN = "gpio_led_syncing_pin"
+
 
 async def get(db: AsyncSession, key: str, default: str | None = None) -> str | None:
     row = await db.scalar(select(Setting).where(Setting.key == key))

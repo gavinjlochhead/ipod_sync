@@ -20,7 +20,9 @@ from app.services.jellyfin import JellyfinClient
 from app.services.pinepods import PinepodsClient
 from app.services.ipod import IPodManager
 from app.services.eject import eject, EjectError
+from app.services.mount import mount as mount_ipod, MountError
 from app.services import mqtt_pub
+from app.services import gpio_control
 from app.services import scrobbler as scrobbler_svc
 
 log = logging.getLogger(__name__)
@@ -62,6 +64,18 @@ async def sync_scrobbler_only(db: AsyncSession = Depends(get_db)):
     scrobbler_svc.archive_scrobbler_log(mount)
     return {"ok": True, "matched": matched, "failed": failed,
             "total": len([e for e in entries if e.was_played])}
+
+
+@router.post("/mount")
+async def mount_ipod_endpoint(db: AsyncSession = Depends(get_db)):
+    """Manually (re)mount the iPod (udisks2 already auto-mounts on plug-in)."""
+    s = await cfg.get_all(db)
+    label = s.get(cfg.IPOD_LABEL, "IPOD") or "IPOD"
+    try:
+        message = await asyncio.to_thread(mount_ipod, label)
+        return {"ok": True, "message": message}
+    except MountError as exc:
+        raise HTTPException(500, str(exc))
 
 
 @router.post("/eject")
@@ -107,6 +121,21 @@ class SettingsPayload(BaseModel):
     mqtt_password: str = ""
     mqtt_prefix: str = "ipod_sync"
     mqtt_ha_discovery: bool = True
+    # GPIO (Raspberry Pi hardware buttons/LEDs)
+    gpio_enabled: bool = False
+    gpio_button_mount_pin: int | None = None
+    gpio_button_unmount_pin: int | None = None
+    gpio_button_sync_pin: int | None = None
+    gpio_led_mounted_pin: int | None = None
+    gpio_led_removable_pin: int | None = None
+    gpio_led_syncing_pin: int | None = None
+
+
+def _int_or_none(v: str | None) -> int | None:
+    try:
+        return int(v) if v not in (None, "") else None
+    except ValueError:
+        return None
 
 
 @router.get("/settings")
@@ -131,6 +160,13 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         "mqtt_password": s.get(cfg.MQTT_PASSWORD, ""),
         "mqtt_prefix": s.get(cfg.MQTT_PREFIX, "ipod_sync"),
         "mqtt_ha_discovery": s.get(cfg.MQTT_HA_DISCOVERY, "true") == "true",
+        "gpio_enabled": s.get(cfg.GPIO_ENABLED, "false") == "true",
+        "gpio_button_mount_pin": _int_or_none(s.get(cfg.GPIO_BUTTON_MOUNT_PIN)),
+        "gpio_button_unmount_pin": _int_or_none(s.get(cfg.GPIO_BUTTON_UNMOUNT_PIN)),
+        "gpio_button_sync_pin": _int_or_none(s.get(cfg.GPIO_BUTTON_SYNC_PIN)),
+        "gpio_led_mounted_pin": _int_or_none(s.get(cfg.GPIO_LED_MOUNTED_PIN)),
+        "gpio_led_removable_pin": _int_or_none(s.get(cfg.GPIO_LED_REMOVABLE_PIN)),
+        "gpio_led_syncing_pin": _int_or_none(s.get(cfg.GPIO_LED_SYNCING_PIN)),
     }
 
 
@@ -155,6 +191,13 @@ async def save_settings(payload: SettingsPayload, db: AsyncSession = Depends(get
         cfg.MQTT_PASSWORD: payload.mqtt_password,
         cfg.MQTT_PREFIX: payload.mqtt_prefix or "ipod_sync",
         cfg.MQTT_HA_DISCOVERY: "true" if payload.mqtt_ha_discovery else "false",
+        cfg.GPIO_ENABLED: "true" if payload.gpio_enabled else "false",
+        cfg.GPIO_BUTTON_MOUNT_PIN: str(payload.gpio_button_mount_pin) if payload.gpio_button_mount_pin is not None else "",
+        cfg.GPIO_BUTTON_UNMOUNT_PIN: str(payload.gpio_button_unmount_pin) if payload.gpio_button_unmount_pin is not None else "",
+        cfg.GPIO_BUTTON_SYNC_PIN: str(payload.gpio_button_sync_pin) if payload.gpio_button_sync_pin is not None else "",
+        cfg.GPIO_LED_MOUNTED_PIN: str(payload.gpio_led_mounted_pin) if payload.gpio_led_mounted_pin is not None else "",
+        cfg.GPIO_LED_REMOVABLE_PIN: str(payload.gpio_led_removable_pin) if payload.gpio_led_removable_pin is not None else "",
+        cfg.GPIO_LED_SYNCING_PIN: str(payload.gpio_led_syncing_pin) if payload.gpio_led_syncing_pin is not None else "",
     })
     # Re-configure MQTT if host is provided
     if payload.mqtt_host:
@@ -169,6 +212,19 @@ async def save_settings(payload: SettingsPayload, db: AsyncSession = Depends(get
         )
         if payload.mqtt_ha_discovery:
             mqtt_pub.publish_ha_discovery()
+
+    gpio_control.configure(
+        enabled=payload.gpio_enabled,
+        mount_pin=payload.gpio_button_mount_pin,
+        unmount_pin=payload.gpio_button_unmount_pin,
+        sync_pin=payload.gpio_button_sync_pin,
+        led_mounted_pin=payload.gpio_led_mounted_pin,
+        led_removable_pin=payload.gpio_led_removable_pin,
+        led_syncing_pin=payload.gpio_led_syncing_pin,
+        mount_point=payload.ipod_mount,
+        ipod_label=payload.ipod_label or "IPOD",
+        session_factory=AsyncSessionLocal,
+    )
     return {"ok": True}
 
 

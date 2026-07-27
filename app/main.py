@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from app.database import init_db, AsyncSessionLocal
 from app.routes import web, api
 from app.services import mqtt_pub
+from app.services import gpio_control
 from app import config as cfg
 
 logging.basicConfig(
@@ -45,6 +46,28 @@ async def lifespan(app: FastAPI):
         if s.get(cfg.MQTT_HA_DISCOVERY, "true") == "true":
             mqtt_pub.publish_ha_discovery()
         log.info("MQTT configured from saved settings")
+
+    # Re-configure GPIO buttons/LEDs if previously saved
+    def _int_or_none(v: str | None) -> int | None:
+        try:
+            return int(v) if v not in (None, "") else None
+        except ValueError:
+            return None
+
+    gpio_control.configure(
+        enabled=s.get(cfg.GPIO_ENABLED, "false") == "true",
+        mount_pin=_int_or_none(s.get(cfg.GPIO_BUTTON_MOUNT_PIN)),
+        unmount_pin=_int_or_none(s.get(cfg.GPIO_BUTTON_UNMOUNT_PIN)),
+        sync_pin=_int_or_none(s.get(cfg.GPIO_BUTTON_SYNC_PIN)),
+        led_mounted_pin=_int_or_none(s.get(cfg.GPIO_LED_MOUNTED_PIN)),
+        led_removable_pin=_int_or_none(s.get(cfg.GPIO_LED_REMOVABLE_PIN)),
+        led_syncing_pin=_int_or_none(s.get(cfg.GPIO_LED_SYNCING_PIN)),
+        mount_point=s.get(cfg.IPOD_MOUNT) or "",
+        ipod_label=s.get(cfg.IPOD_LABEL, "IPOD") or "IPOD",
+        session_factory=AsyncSessionLocal,
+    )
+    if s.get(cfg.GPIO_ENABLED, "false") == "true":
+        log.info("GPIO configured from saved settings")
 
     yield
 

@@ -235,6 +235,75 @@
     </div>
   </div>
 
+  <!-- GPIO hardware buttons/LEDs -->
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-cpu me-2"></i>GPIO Buttons &amp; LEDs</span>
+        <span id="gpio-status" class="badge bg-secondary">Disabled</span>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">
+          Wire physical buttons and status LEDs to the Pi's GPIO header
+          (BCM numbering). Every field is optional — leave a pin blank to
+          skip that button/LED. Buttons go to GND (internal pull-up is
+          used); LEDs need a series resistor to GND.
+        </p>
+        <div class="mb-3 form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="gpio-enabled">
+          <label class="form-check-label" for="gpio-enabled">
+            Enable GPIO controls
+          </label>
+        </div>
+
+        <h6 class="text-muted text-uppercase small mb-2 mt-3">Buttons</h6>
+        <div class="row g-2 mb-3">
+          <div class="col-4">
+            <label class="form-label">Mount</label>
+            <input type="number" class="form-control" id="gpio-btn-mount" placeholder="BCM #">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Unmount</label>
+            <input type="number" class="form-control" id="gpio-btn-unmount" placeholder="BCM #">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Sync</label>
+            <input type="number" class="form-control" id="gpio-btn-sync" placeholder="BCM #">
+          </div>
+        </div>
+
+        <h6 class="text-muted text-uppercase small mb-2">LEDs</h6>
+        <div class="row g-2 mb-3">
+          <div class="col-4">
+            <label class="form-label">Mounted</label>
+            <input type="number" class="form-control" id="gpio-led-mounted" placeholder="BCM #">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Removable</label>
+            <input type="number" class="form-control" id="gpio-led-removable" placeholder="BCM #">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Syncing</label>
+            <input type="number" class="form-control" id="gpio-led-syncing" placeholder="BCM #">
+          </div>
+        </div>
+
+        <div class="alert alert-dark-info small">
+          <i class="bi bi-info-circle me-1"></i>
+          <strong>Mounted</strong> LED is on while the iPod is mounted.
+          <strong>Removable</strong> LED is on while it is safely unmounted
+          (OK to unplug). <strong>Syncing</strong> LED flashes while a sync
+          is running. Requires the <code>gpiozero</code> package on the Pi
+          (installed automatically by <code>install.sh</code>).
+        </div>
+
+        <button class="btn btn-primary" onclick="saveSettings()">
+          <i class="bi bi-floppy me-1"></i>Save
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- HA eject integration reference -->
   <div class="col-12">
     <div class="card">
@@ -347,6 +416,17 @@ async function loadSettings() {
   document.getElementById('mqtt-pass').value = s.mqtt_password || '';
   document.getElementById('mqtt-prefix').value = s.mqtt_prefix || 'ipod_sync';
   document.getElementById('mqtt-ha-discovery').checked = s.mqtt_ha_discovery !== false;
+  document.getElementById('gpio-enabled').checked = !!s.gpio_enabled;
+  document.getElementById('gpio-btn-mount').value = s.gpio_button_mount_pin ?? '';
+  document.getElementById('gpio-btn-unmount').value = s.gpio_button_unmount_pin ?? '';
+  document.getElementById('gpio-btn-sync').value = s.gpio_button_sync_pin ?? '';
+  document.getElementById('gpio-led-mounted').value = s.gpio_led_mounted_pin ?? '';
+  document.getElementById('gpio-led-removable').value = s.gpio_led_removable_pin ?? '';
+  document.getElementById('gpio-led-syncing').value = s.gpio_led_syncing_pin ?? '';
+  if (s.gpio_enabled) {
+    document.getElementById('gpio-status').className = 'badge bg-success';
+    document.getElementById('gpio-status').textContent = 'Enabled';
+  }
 
   // HA REST endpoint display
   document.getElementById('ha-endpoint-display').value =
@@ -361,6 +441,11 @@ async function loadSettings() {
     await loadJFLibs();
     document.getElementById('jf-lib').value = s.jellyfin_library_id;
   }
+}
+
+function pinOrNull(id) {
+  const v = document.getElementById(id).value;
+  return v === '' ? null : parseInt(v);
 }
 
 async function saveSettings() {
@@ -383,6 +468,13 @@ async function saveSettings() {
     mqtt_password: document.getElementById('mqtt-pass').value,
     mqtt_prefix: document.getElementById('mqtt-prefix').value.trim() || 'ipod_sync',
     mqtt_ha_discovery: document.getElementById('mqtt-ha-discovery').checked,
+    gpio_enabled: document.getElementById('gpio-enabled').checked,
+    gpio_button_mount_pin: pinOrNull('gpio-btn-mount'),
+    gpio_button_unmount_pin: pinOrNull('gpio-btn-unmount'),
+    gpio_button_sync_pin: pinOrNull('gpio-btn-sync'),
+    gpio_led_mounted_pin: pinOrNull('gpio-led-mounted'),
+    gpio_led_removable_pin: pinOrNull('gpio-led-removable'),
+    gpio_led_syncing_pin: pinOrNull('gpio-led-syncing'),
   };
   await apiFetch('/settings', {method: 'POST', body: JSON.stringify(payload)});
   const msg = document.getElementById('save-msg');
@@ -393,6 +485,11 @@ async function saveSettings() {
     document.getElementById('mqtt-status').className = 'badge bg-success';
     document.getElementById('mqtt-status').textContent = `${payload.mqtt_host}:${payload.mqtt_port}`;
   }
+
+  document.getElementById('gpio-status').className =
+    `badge ${payload.gpio_enabled ? 'bg-success' : 'bg-secondary'}`;
+  document.getElementById('gpio-status').textContent =
+    payload.gpio_enabled ? 'Enabled' : 'Disabled';
 }
 
 function copyHaUrl() {

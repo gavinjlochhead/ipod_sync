@@ -13,3 +13,4 @@ mutagen==1.47.0
 aiofiles==24.1.0
 python-slugify==8.0.4
 paho-mqtt==1.6.1
+gpiozero==2.0.1

@@ -65,6 +65,28 @@ on the device: **Settings → General Settings → Root Menu**, add
 `Shortcuts` to the menu order. (Any shortcuts you add by hand elsewhere in
 that file are left alone.)
 
+## GPIO Buttons &amp; Status LEDs (optional)
+
+You can wire physical buttons and LEDs to the Pi's GPIO header for
+mounting, unmounting, and syncing without opening the web UI:
+
+- **Mount button** — (re)mounts the iPod
+- **Unmount button** — safely ejects the iPod
+- **Sync button** — starts a sync
+- **Mounted LED** — on while the iPod is mounted
+- **Removable LED** — on while the iPod is unmounted (safe to unplug)
+- **Syncing LED** — flashes while a sync is running
+
+Every pin is independently optional — wire only what you have. Configure
+BCM pin numbers under **Settings → GPIO Buttons & LEDs**. Buttons should
+be wired to GND (internal pull-up is used, no external resistor needed);
+LEDs need a series resistor to GND.
+
+`install.sh` installs the `python3-lgpio` GPIO backend via apt and adds
+the service user to the `gpio` group. If you're running the app outside
+of `install.sh` (e.g. for development), install `gpiozero` plus a pin
+factory backend (`lgpio` on Pi 4/5, `RPi.GPIO` on older boards).
+
 ## Services
 
 | Service | Description |

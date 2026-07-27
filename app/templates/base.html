@@ -80,6 +80,9 @@
         <span id="ipod-indicator" class="badge bg-secondary">
           <i class="bi bi-usb-symbol me-1"></i>Not detected
         </span>
+        <button class="btn btn-sm btn-outline-success" id="btn-mount" onclick="mountIPod()" style="display:none">
+          <i class="bi bi-plug me-1"></i>Mount
+        </button>
         <button class="btn btn-sm btn-outline-warning" id="btn-eject" onclick="ejectIPod()" style="display:none">
           <i class="bi bi-eject me-1"></i>Eject
         </button>
@@ -147,16 +150,36 @@ async function checkIPod() {
     const r = await apiFetch('/test/ipod');
     const el = document.getElementById('ipod-indicator');
     const ejectBtn = document.getElementById('btn-eject');
+    const mountBtn = document.getElementById('btn-mount');
     if (r.ok) {
       el.className = 'badge bg-success';
       el.innerHTML = `<i class="bi bi-usb-symbol me-1"></i>${r.free_gb}GB free`;
       if (ejectBtn) ejectBtn.style.display = '';
+      if (mountBtn) mountBtn.style.display = 'none';
     } else {
       el.className = 'badge bg-secondary';
       el.innerHTML = `<i class="bi bi-usb-symbol me-1"></i>Not detected`;
       if (ejectBtn) ejectBtn.style.display = 'none';
+      if (mountBtn) mountBtn.style.display = '';
     }
   } catch(e) {}
+}
+
+async function mountIPod() {
+  const btn = document.getElementById('btn-mount');
+  btn.disabled = true;
+  try {
+    const r = await apiFetch('/mount', {method: 'POST'});
+    if (r.ok) {
+      alert(r.message);
+    } else {
+      alert('Mount failed: ' + (r.detail || r.message || 'Unknown error'));
+    }
+  } catch(e) {
+    alert('Mount request failed');
+  }
+  btn.disabled = false;
+  checkIPod();
 }
 
 async function ejectIPod() {

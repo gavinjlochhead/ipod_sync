@@ -29,6 +29,12 @@ apt-get install -y -qq \
     rsync udisks2 util-linux udev \
     2>/dev/null
 
+# GPIO backend for optional hardware buttons/LEDs — best-effort, since
+# this package isn't available on every Raspberry Pi OS release (or on
+# non-Pi hosts). GPIO controls just won't work if it's missing.
+apt-get install -y -qq python3-lgpio 2>/dev/null \
+    || warn "python3-lgpio not available — GPIO buttons/LEDs won't work until it's installed"
+
 # ── User & directories ───────────────────────────────────────
 info "Creating service user '${SERVICE_USER}'…"
 if ! id "${SERVICE_USER}" &>/dev/null; then
@@ -38,7 +44,8 @@ fi
 
 # plugdev  → udisks2 mount/unmount without root
 # disk     → blkid can read device labels
-usermod -aG plugdev,disk "${SERVICE_USER}" 2>/dev/null || true
+# gpio     → access /dev/gpiochip* for the optional hardware buttons/LEDs
+usermod -aG plugdev,disk,gpio "${SERVICE_USER}" 2>/dev/null || true
 
 info "Creating directories…"
 mkdir -p "${INSTALL_DIR}" "${DATA_DIR}" "${CACHE_DIR}" "${MOUNT_POINT}"
@@ -57,7 +64,10 @@ rsync -a --delete \
 
 # ── Python virtual environment ───────────────────────────────
 info "Creating Python virtual environment…"
-"${PYTHON}" -m venv "${INSTALL_DIR}/venv"
+# --system-site-packages lets the venv's pip-installed gpiozero see the
+# apt-installed python3-lgpio GPIO backend, which needs to be compiled
+# against the Pi's kernel headers and isn't reliable to pip-install fresh.
+"${PYTHON}" -m venv --system-site-packages "${INSTALL_DIR}/venv"
 "${INSTALL_DIR}/venv/bin/pip" install --upgrade pip -q
 info "Installing Python dependencies…"
 "${INSTALL_DIR}/venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt" -q
@@ -70,7 +80,8 @@ chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}"
 info "Installing sudoers rules…"
 SUDOERS_FILE="/etc/sudoers.d/ipod-sync"
 tee "${SUDOERS_FILE}" > /dev/null <<EOF
-# ipod-sync: allow safe eject and device label detection
+# ipod-sync: allow safe mount/eject and device label detection
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/udisksctl mount -b *
 ${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/udisksctl unmount -b *
 ${SERVICE_USER} ALL=(ALL) NOPASSWD: /usr/bin/udisksctl power-off -b *
 ${SERVICE_USER} ALL=(ALL) NOPASSWD: /bin/umount ${MOUNT_POINT}
