@@ -47,6 +47,10 @@ Then open `http://<pi-ip>:8000` in your browser.
 ```
 
 Rockbox scans these automatically and builds its database on boot.
+`Podcasts/` contains a `database.ignore` marker (created automatically by
+the sync) so podcast episodes are excluded from Rockbox's tag Database —
+otherwise their ID3 artist tags (the show name) would show up mixed in
+with music artists. Podcasts stay browsable via Files → Podcasts.
 
 ## Services
 

@@ -177,6 +177,24 @@ class IPodManager:
     def podcast_rel(self, podcast_title: str, filename: str) -> str:
         return str(Path("Podcasts") / safe_name(podcast_title) / safe_filename(filename))
 
+    def ensure_podcast_ignore(self) -> None:
+        """
+        Exclude Podcasts/ from Rockbox's tag database.
+
+        Rockbox's Database (Artist/Album browsing) is built from ID3 tags
+        scanned across the whole disk, not from folder structure. Podcast
+        episodes keep the ID3 "artist" tag from the source feed (the show
+        name), so without this they get lumped into the Artist list next to
+        real music artists. `database.ignore` tells Rockbox's tagcache
+        scanner to skip this subtree; podcasts stay reachable via Files.
+        """
+        podcasts_dir = self.mount / "Podcasts"
+        try:
+            podcasts_dir.mkdir(parents=True, exist_ok=True)
+            (podcasts_dir / "database.ignore").touch()
+        except Exception as exc:
+            log.warning("Could not create database.ignore in Podcasts/: %s", exc)
+
     async def copy_podcast_episode(
         self, src: str, podcast_title: str, filename: str
     ) -> str:

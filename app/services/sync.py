@@ -75,6 +75,8 @@ async def run_sync(session_factory: async_sessionmaker) -> None:
             if not ipod.is_mounted():
                 raise RuntimeError("iPod mount directory is empty — device not mounted?")
 
+            ipod.ensure_podcast_ignore()
+
             # Step 1: Read Rockbox scrobbler log and sync play history back to Jellyfin
             scrobble_matched = 0
             if (settings.get(cfg.SCROBBLE_TO_JELLYFIN, "true") or "true").lower() == "true":
